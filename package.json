@@ -1,8 +1,31 @@
 {
   "name": "react-native-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for React Native app state",
+  "version": "1.0.0",
+  "description": "Bidirectional MCP bridge connecting AI agents to running React Native apps",
   "license": "MIT",
+  "author": "Aliaksei Pranko",
+  "homepage": "https://github.com/pranko17/react-native-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pranko17/react-native-mcp.git"
+  },
+  "keywords": [
+    "react-native",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "debugging",
+    "devtools",
+    "agent",
+    "claude",
+    "fiber",
+    "inspection"
+  ],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {

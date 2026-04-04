@@ -16,6 +16,7 @@ export {
 
 // Modules (safe for React Native)
 export {
+  componentsModule,
   consoleModule,
   deviceModule,
   errorsModule,

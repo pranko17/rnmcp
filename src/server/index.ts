@@ -10,19 +10,13 @@ export async function createServer(config?: ServerConfig): Promise<void> {
   const mcpServer = new McpServerWrapper(bridge);
 
   bridge.onRegistration((modules) => {
-    mcpServer.registerTools(modules);
+    mcpServer.setModules(modules);
   });
   bridge.onStateUpdate((key, value) => {
     mcpServer.setState(key, value);
   });
   bridge.onStateRemove((key) => {
     mcpServer.removeState(key);
-  });
-  bridge.onToolRegister((module, tool) => {
-    mcpServer.registerTool(module, tool);
-  });
-  bridge.onToolUnregister((module, toolName) => {
-    mcpServer.unregisterTool(module, toolName);
   });
 
   await bridge.start();

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { type WebSocket } from 'ws';
 
-import { type ClientMessage, type ToolRequest } from '@/shared/protocol';
+import { type ClientMessage, type ModuleDescriptor, type ToolRequest } from '@/shared/protocol';
 
 import { type BridgeEvents } from './types';
 
@@ -22,7 +22,15 @@ export class Bridge {
   >();
   private events: Partial<BridgeEvents> = {};
 
+  private registrationResolve: ((modules: ModuleDescriptor[]) => void) | null = null;
+
   constructor(private readonly port: number) {}
+
+  waitForRegistration(): Promise<ModuleDescriptor[]> {
+    return new Promise((resolve) => {
+      this.registrationResolve = resolve;
+    });
+  }
 
   onRegistration(handler: BridgeEvents['onRegistration']): void {
     this.events.onRegistration = handler;
@@ -119,6 +127,10 @@ export class Bridge {
   private handleMessage(message: ClientMessage): void {
     switch (message.type) {
       case 'registration': {
+        if (this.registrationResolve) {
+          this.registrationResolve(message.modules);
+          this.registrationResolve = null;
+        }
         this.events.onRegistration?.(message.modules);
         break;
       }

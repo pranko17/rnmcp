@@ -2,40 +2,23 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import { type ModuleDescriptor, type ModuleToolDescriptor } from '@/shared/protocol';
+import { type ModuleDescriptor } from '@/shared/protocol';
 
 import { type Bridge } from './bridge';
 
 export class McpServerWrapper {
   private mcp: McpServer;
+  private modules: ModuleDescriptor[] = [];
   private stateStore = new Map<string, unknown>();
-  private registeredTools = new Set<string>();
 
   constructor(private readonly bridge: Bridge) {
     this.mcp = new McpServer({ name: 'react-native-mcp', version: '0.1.0' });
 
-    this.registerBuiltInTools();
+    this.registerTools();
   }
 
-  registerTools(modules: ModuleDescriptor[]): void {
-    for (const mod of modules) {
-      for (const tool of mod.tools) {
-        const fullName = `${mod.name}_${tool.name}`;
-        this.registerBridgeTool(fullName, mod.name, tool.name, tool);
-      }
-    }
-  }
-
-  registerTool(module: string, tool: ModuleToolDescriptor): void {
-    const fullName = `${module}_${tool.name}`;
-    this.registerBridgeTool(fullName, module, tool.name, tool);
-  }
-
-  unregisterTool(module: string, toolName: string): void {
-    const fullName = `${module}_${toolName}`;
-    this.registeredTools.delete(fullName);
-    // Note: McpServer SDK doesn't support dynamic tool removal yet
-    // The tool will remain registered but return an error if called after unregister
+  setModules(modules: ModuleDescriptor[]): void {
+    this.modules = modules;
   }
 
   setState(key: string, value: unknown): void {
@@ -51,7 +34,161 @@ export class McpServerWrapper {
     await this.mcp.connect(transport);
   }
 
-  private registerBuiltInTools(): void {
+  private registerTools(): void {
+    this.mcp.tool(
+      'call',
+      'Call a tool registered by the React Native app. Use list_tools first to see available tools.',
+      {
+        args: z
+          .string()
+          .optional()
+          .describe('Arguments as JSON string (e.g. {"screen": "AUTH_LOGIN_SCREEN"})'),
+        tool: z
+          .string()
+          .describe('Tool name in format "module_method" (e.g. "navigation_navigate")'),
+      },
+      async ({ args, tool }) => {
+        if (!this.bridge.isClientConnected()) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({ error: 'React Native app is not connected' }),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        const parts = tool.split('_');
+        if (parts.length < 2) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  error: `Invalid tool name "${tool}". Use "module_method" format.`,
+                }),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        // Find the module and method
+        const moduleName = parts[0]!;
+        const methodName = parts.slice(1).join('_');
+
+        const mod = this.modules.find((m) => {
+          return m.name === moduleName;
+        });
+        if (!mod) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  error: `Module "${moduleName}" not found. Available: ${this.modules
+                    .map((m) => {
+                      return m.name;
+                    })
+                    .join(', ')}`,
+                }),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        const toolDef = mod.tools.find((t) => {
+          return t.name === methodName;
+        });
+        if (!toolDef) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  error: `Tool "${methodName}" not found in module "${moduleName}". Available: ${mod.tools
+                    .map((t) => {
+                      return t.name;
+                    })
+                    .join(', ')}`,
+                }),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        let parsedArgs: Record<string, unknown> = {};
+        if (args) {
+          try {
+            parsedArgs = JSON.parse(args) as Record<string, unknown>;
+          } catch {
+            return {
+              content: [
+                { text: JSON.stringify({ error: 'Invalid JSON in args' }), type: 'text' as const },
+              ],
+            };
+          }
+        }
+        const result = await this.bridge.call(moduleName, methodName, parsedArgs);
+        return {
+          content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
+        };
+      }
+    );
+
+    this.mcp.tool(
+      'list_tools',
+      'List all tools registered by the React Native app, grouped by module',
+      async () => {
+        if (!this.bridge.isClientConnected()) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  connected: false,
+                  error: 'React Native app is not connected',
+                }),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        const tools = this.modules.map((mod) => {
+          return {
+            module: mod.name,
+            tools: mod.tools.map((t) => {
+              return {
+                description: t.description,
+                inputSchema: t.inputSchema,
+                name: `${mod.name}_${t.name}`,
+              };
+            }),
+          };
+        });
+
+        return {
+          content: [{ text: JSON.stringify(tools, null, 2), type: 'text' as const }],
+        };
+      }
+    );
+
+    this.mcp.tool('connection_status', 'Check if the React Native app is connected', async () => {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              connected: this.bridge.isClientConnected(),
+              modules: this.modules.map((m) => {
+                return m.name;
+              }),
+            }),
+            type: 'text' as const,
+          },
+        ],
+      };
+    });
+
     this.mcp.tool(
       'state_get',
       'Read a state value exposed by the React Native app via useMcpState',
@@ -86,47 +223,5 @@ export class McpServerWrapper {
         };
       }
     );
-
-    this.mcp.tool('connection_status', 'Check if the React Native app is connected', async () => {
-      return {
-        content: [
-          {
-            text: JSON.stringify({ connected: this.bridge.isClientConnected() }),
-            type: 'text' as const,
-          },
-        ],
-      };
-    });
-  }
-
-  private registerBridgeTool(
-    fullName: string,
-    moduleName: string,
-    methodName: string,
-    tool: ModuleToolDescriptor
-  ): void {
-    if (this.registeredTools.has(fullName)) return;
-    this.registeredTools.add(fullName);
-
-    if (tool.inputSchema && Object.keys(tool.inputSchema).length > 0) {
-      const shape: Record<string, z.ZodTypeAny> = {};
-      for (const key of Object.keys(tool.inputSchema)) {
-        shape[key] = z.any().describe(String(key));
-      }
-
-      this.mcp.tool(fullName, tool.description, shape, async (args) => {
-        const result = await this.bridge.call(moduleName, methodName, args);
-        return {
-          content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
-        };
-      });
-    } else {
-      this.mcp.tool(fullName, tool.description, async () => {
-        const result = await this.bridge.call(moduleName, methodName, {});
-        return {
-          content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
-        };
-      });
-    }
   }
 }

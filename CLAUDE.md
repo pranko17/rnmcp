@@ -22,13 +22,24 @@ No test suite is configured.
 AI Agent  --stdio/MCP-->  MCP Server (Node.js)  --WebSocket-->  RN App (device)
 ```
 
+### MCP Server Tools
+
+The server exposes 5 static tools (always available, no dynamic registration needed):
+
+- **`call`** — Universal proxy to call any tool registered by the RN app. Format: `call(tool: "module_method", args: '{"key": "value"}')`. Args is a JSON string.
+- **`list_tools`** — Lists all available tools from all registered modules, grouped by module.
+- **`connection_status`** — Check if the RN app is connected and which modules are registered.
+- **`state_get`** / **`state_list`** — Read state exposed by `useMcpState` hooks.
+
+This design avoids dynamic tool registration issues — all module tools are accessed through the universal `call` tool.
+
 ### Package Structure
 
 The package has three entry points:
 
 - **Root** (`src/index.ts`) — re-exports client + modules (RN-safe, no server code)
 - **Server** (`src/server/`) — Node.js MCP server + WebSocket bridge (not bundled into RN)
-- **Modules** (`src/modules/`) — built-in RN modules (navigation, console)
+- **Modules** (`src/modules/`) — built-in RN modules
 
 ```
 src/
@@ -40,11 +51,15 @@ src/
     utils/                  — McpConnection (WS client), ModuleRunner
   server/
     bridge.ts               — WebSocket server, request/response dispatch
-    mcpServer.ts            — McpServer wrapper, built-in tools (state_get, state_list, connection_status)
+    mcpServer.ts            — 5 static MCP tools (call, list_tools, connection_status, state_get, state_list)
     cli.ts                  — CLI entry point (npx react-native-mcp)
   modules/
-    console/                — Console log capture module (get_logs, get_errors, etc.)
-    navigation/             — Navigation module (get_state, navigate, push, pop, replace, reset)
+    components/             — React fiber tree inspection, invoke callbacks, call ref methods
+    console/                — Console log capture (log/warn/error/info/debug)
+    device/                 — Device info, app state, keyboard, linking, reload, vibrate
+    errors/                 — Unhandled errors and promise rejections
+    navigation/             — Navigation state, navigate, push, pop, replace, reset
+    network/                — HTTP request interception (fetch + XMLHttpRequest)
   shared/
     protocol.ts             — WebSocket message types (RegistrationMessage, ToolRequest, etc.)
 ```
@@ -62,11 +77,17 @@ src/
 
 ```typescript
 // 1. Initialize (creates connection, must be called first)
-McpClient.initialize(port?);
+McpClient.initialize({ port: 8347, debug: true });
 
 // 2. Register modules (global, can be called from anywhere after init)
-McpClient.getInstance().registerModules([navigationModule(ref), consoleModule()]);
-McpClient.getInstance().registerModule(myModule);
+McpClient.getInstance().registerModules([
+  componentsModule(),
+  navigationModule(ref),
+  consoleModule(),
+  deviceModule(),
+  errorsModule(),
+  networkModule(),
+]);
 
 // 3. McpProvider only provides context for hooks (useMcpState, useMcpTool)
 <McpProvider>{children}</McpProvider>
@@ -77,16 +98,14 @@ Calling `McpClient.getInstance()` before `initialize()` throws an error with a c
 Three ways to register modules:
 - **Global**: `McpClient.getInstance().registerModule(module)` — from anywhere after init
 - **Hook**: `useMcpModule(() => module, deps)` — tied to component lifecycle
-- **Init**: Pass modules array when initializing
+- **Init time**: Register right after `McpClient.initialize()`
 
 ### Data Flow
 
 1. `McpClient.initialize()` opens WebSocket to bridge (port 8347)
 2. On connect + module registration, sends `RegistrationMessage` with module descriptors
-3. MCP server registers tools dynamically based on registration
-4. AI agent calls a tool → server sends `ToolRequest` over WS → RN app executes handler → returns `ToolResponse`
-5. `useMcpState` sends `state_update` messages → server stores in memory → AI reads via `state_get` tool (no WS roundtrip)
-6. `useMcpTool` sends `tool_register`/`tool_unregister` → server adds/removes tools dynamically
+3. AI agent calls `call` tool → server sends `ToolRequest` over WS → RN app executes handler → returns `ToolResponse`
+4. `useMcpState` sends `state_update` messages → server stores in memory → AI reads via `state_get` (no WS roundtrip)
 
 ### Dev vs Production
 
@@ -113,8 +132,25 @@ interface ToolHandler {
 
 ### Built-in Modules
 
+- **components** — `componentsModule()`: React fiber tree inspection. Tools:
+  - `get_tree` / `get_component` / `get_children` / `get_props` / `find_all` — inspect component tree
+  - `invoke` — call any callback prop (onPress, onChangeText, etc.) with custom args
+  - `call_ref` / `get_ref_methods` — call methods on native instance (focus, blur, measure, etc.)
+  - Search supports: `name`, `testID`, `text`, `index` (N-th match), `within` (parent path with "/" separator and ":N" index, e.g. `"Checkbox/Pressable"`, `"Button:1/View"`)
+
 - **navigation** — `navigationModule(navigationRef)`: get_state, get_current_route, get_current_route_state, navigate, push, pop, pop_to, pop_to_top, replace, reset
-- **console** — `consoleModule(options?)`: intercepts console.log/warn/error/info/debug, ring buffer (default 100), stack traces for error/warn. Tools: get_logs, get_errors, get_warnings, get_info, get_debug, clear_logs. Serializes functions, class instances, circular refs, Errors, Dates, RegExp, Symbols.
+
+- **console** — `consoleModule(options?)`: intercepts console.log/warn/error/info/debug, ring buffer (default 100), stack traces for error/warn. Serializes functions, class instances, circular refs, Errors, Dates, RegExp, Symbols. Tools: get_logs, get_errors, get_warnings, get_info, get_debug, clear_logs
+
+- **device** — `deviceModule()`: get_device_info, get_platform, get_dimensions, get_pixel_ratio, get_appearance, get_app_state, get_accessibility_info, get_keyboard_state, dismiss_keyboard, open_url, can_open_url, get_initial_url, open_settings, reload, vibrate
+
+- **errors** — `errorsModule()`: captures unhandled JS errors (ErrorUtils) and promise rejections (console.error interception). Tools: get_errors, get_fatal, get_stats, clear_errors
+
+- **network** — `networkModule(options?)`: intercepts fetch and XMLHttpRequest, captures request/response bodies, headers, status, duration. Auto-ignores WebSocket, Metro, symbolicate. Tools: get_requests, get_request, get_errors, get_pending, get_stats, clear_requests
+
+### Debug Logging
+
+`McpClient.initialize({ debug: true })` enables colored console output showing all tool requests/responses. Uses original `console.log` (captured before console module intercepts it) so debug logs don't appear in the console module buffer.
 
 ## Code Style
 

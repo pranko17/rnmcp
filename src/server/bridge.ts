@@ -82,7 +82,12 @@ export class Bridge {
     });
   }
 
-  async call(module: string, method: string, args: Record<string, unknown>): Promise<unknown> {
+  async call(
+    module: string,
+    method: string,
+    args: Record<string, unknown>,
+    timeout?: number
+  ): Promise<unknown> {
     if (!this.client) {
       throw new Error('No client connected');
     }
@@ -96,11 +101,13 @@ export class Bridge {
       type: 'tool_request',
     };
 
+    const timeoutMs = timeout ?? REQUEST_TIMEOUT;
+
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request ${module}.${method} timed out after ${REQUEST_TIMEOUT}ms`));
-      }, REQUEST_TIMEOUT);
+        reject(new Error(`Request ${module}.${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       this.pendingRequests.set(id, { reject, resolve, timer });
       this.client!.send(JSON.stringify(request));

@@ -1,3 +1,4 @@
+export { alertModule } from './alert';
 export { componentsModule } from './components';
 export { consoleModule } from './console';
 export { deviceModule } from './device';

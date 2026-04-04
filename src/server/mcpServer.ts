@@ -129,7 +129,7 @@ export class McpServerWrapper {
             };
           }
         }
-        const result = await this.bridge.call(moduleName, methodName, parsedArgs);
+        const result = await this.bridge.call(moduleName, methodName, parsedArgs, toolDef.timeout);
         return {
           content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
         };

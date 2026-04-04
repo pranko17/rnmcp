@@ -4,6 +4,7 @@ export interface ModuleToolDescriptor {
   description: string;
   name: string;
   inputSchema?: Record<string, unknown>;
+  timeout?: number;
 }
 
 export interface ModuleDescriptor {

@@ -1,0 +1,62 @@
+import { type McpModule } from '@/client/models/types';
+
+const ALERT_TIMEOUT = 60_000;
+
+type ButtonStyle = 'cancel' | 'default' | 'destructive';
+
+interface AlertButton {
+  text: string;
+  style?: ButtonStyle;
+}
+
+export const alertModule = (): McpModule => {
+  const getRN = () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+    return require('react-native');
+  };
+
+  return {
+    name: 'alert',
+    tools: {
+      show: {
+        description:
+          'Show an alert dialog with custom buttons. Each button can have a style (default, cancel, destructive). Returns the pressed button label and index.',
+        handler: (args) => {
+          const { Alert } = getRN();
+          const rawButtons = args.buttons as Array<string | AlertButton> | undefined;
+          const buttons: AlertButton[] = rawButtons
+            ? rawButtons.map((b) => {
+                return typeof b === 'string' ? { text: b } : b;
+              })
+            : [{ text: 'OK' }];
+
+          return new Promise((resolve) => {
+            Alert.alert(
+              (args.title as string) || 'Alert',
+              (args.message as string) || '',
+              buttons.map((btn, index) => {
+                return {
+                  onPress: () => {
+                    resolve({ button: btn.text, index });
+                  },
+                  style: btn.style ?? 'default',
+                  text: btn.text,
+                };
+              })
+            );
+          });
+        },
+        inputSchema: {
+          buttons: {
+            description:
+              'Array of buttons. Each can be a string or {text, style?}. Style: "default", "cancel", "destructive". Default: ["OK"]',
+            type: 'array',
+          },
+          message: { description: 'Alert message body', type: 'string' },
+          title: { description: 'Alert title', type: 'string' },
+        },
+        timeout: ALERT_TIMEOUT,
+      },
+    },
+  };
+};

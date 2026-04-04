@@ -51,6 +51,7 @@ export class ModuleRunner {
             description: tool.description,
             inputSchema: tool.inputSchema,
             name: toolName,
+            timeout: tool.timeout,
           };
         }),
       });

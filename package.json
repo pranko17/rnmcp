@@ -1,5 +1,5 @@
 {
-  "name": "react-native-mcp",
+  "name": "@pranko97/react-native-mcp",
   "version": "1.0.0",
   "description": "Bidirectional MCP bridge connecting AI agents to running React Native apps",
   "license": "MIT",

@@ -2,8 +2,8 @@
 
 export interface ModuleToolDescriptor {
   description: string;
-  inputSchema?: Record<string, unknown>;
   name: string;
+  inputSchema?: Record<string, unknown>;
 }
 
 export interface ModuleDescriptor {
@@ -29,10 +29,10 @@ export interface ToolRequest {
 // === RN App → Server: результат ===
 
 export interface ToolResponse {
-  error?: string;
   id: string;
-  result?: unknown;
   type: 'tool_response';
+  error?: string;
+  result?: unknown;
 }
 
 // === RN App → Server: state updates (от useMcpState) ===

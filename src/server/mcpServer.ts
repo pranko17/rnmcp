@@ -2,8 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import type { ModuleDescriptor, ModuleToolDescriptor } from '../shared/protocol';
-import type { Bridge } from './bridge';
+import { type ModuleDescriptor, type ModuleToolDescriptor } from '@/shared/protocol';
+
+import { type Bridge } from './bridge';
 
 export class McpServerWrapper {
   private mcp: McpServer;
@@ -11,9 +12,7 @@ export class McpServerWrapper {
   private registeredTools = new Set<string>();
 
   constructor(private readonly bridge: Bridge) {
-    this.mcp = new McpServer(
-      { name: 'react-native-mcp', version: '0.1.0' },
-    );
+    this.mcp = new McpServer({ name: 'react-native-mcp', version: '0.1.0' });
 
     this.registerBuiltInTools();
   }
@@ -61,13 +60,20 @@ export class McpServerWrapper {
         const value = this.stateStore.get(key);
         if (value === undefined) {
           return {
-            content: [{ text: JSON.stringify({ error: `State "${key}" not found. Use state_list to see available keys.` }), type: 'text' as const }],
+            content: [
+              {
+                text: JSON.stringify({
+                  error: `State "${key}" not found. Use state_list to see available keys.`,
+                }),
+                type: 'text' as const,
+              },
+            ],
           };
         }
         return {
           content: [{ text: JSON.stringify(value, null, 2), type: 'text' as const }],
         };
-      },
+      }
     );
 
     this.mcp.tool(
@@ -78,60 +84,49 @@ export class McpServerWrapper {
         return {
           content: [{ text: JSON.stringify({ keys }, null, 2), type: 'text' as const }],
         };
-      },
+      }
     );
 
-    this.mcp.tool(
-      'connection_status',
-      'Check if the React Native app is connected',
-      async () => {
-        return {
-          content: [{
+    this.mcp.tool('connection_status', 'Check if the React Native app is connected', async () => {
+      return {
+        content: [
+          {
             text: JSON.stringify({ connected: this.bridge.isClientConnected() }),
             type: 'text' as const,
-          }],
-        };
-      },
-    );
+          },
+        ],
+      };
+    });
   }
 
   private registerBridgeTool(
     fullName: string,
     moduleName: string,
     methodName: string,
-    tool: ModuleToolDescriptor,
+    tool: ModuleToolDescriptor
   ): void {
     if (this.registeredTools.has(fullName)) return;
     this.registeredTools.add(fullName);
 
     if (tool.inputSchema && Object.keys(tool.inputSchema).length > 0) {
       const shape: Record<string, z.ZodTypeAny> = {};
-      for (const [key, _value] of Object.entries(tool.inputSchema)) {
+      for (const key of Object.keys(tool.inputSchema)) {
         shape[key] = z.any().describe(String(key));
       }
 
-      this.mcp.tool(
-        fullName,
-        tool.description,
-        shape,
-        async (args) => {
-          const result = await this.bridge.call(moduleName, methodName, args);
-          return {
-            content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
-          };
-        },
-      );
+      this.mcp.tool(fullName, tool.description, shape, async (args) => {
+        const result = await this.bridge.call(moduleName, methodName, args);
+        return {
+          content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
+        };
+      });
     } else {
-      this.mcp.tool(
-        fullName,
-        tool.description,
-        async () => {
-          const result = await this.bridge.call(moduleName, methodName, {});
-          return {
-            content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
-          };
-        },
-      );
+      this.mcp.tool(fullName, tool.description, async () => {
+        const result = await this.bridge.call(moduleName, methodName, {});
+        return {
+          content: [{ text: JSON.stringify(result, null, 2), type: 'text' as const }],
+        };
+      });
     }
   }
 }

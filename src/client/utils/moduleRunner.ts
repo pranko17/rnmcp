@@ -1,5 +1,5 @@
-import type { ModuleDescriptor, ToolRequest } from '../shared/protocol';
-import type { McpModule, ToolHandler } from './types';
+import { type McpModule, type ToolHandler } from '@/client/models/types';
+import { type ModuleDescriptor, type ToolRequest } from '@/shared/protocol';
 
 export class ModuleRunner {
   private modules = new Map<string, Record<string, ToolHandler>>();

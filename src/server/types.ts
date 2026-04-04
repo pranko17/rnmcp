@@ -1,4 +1,4 @@
-import type { ModuleDescriptor, ModuleToolDescriptor } from '../shared/protocol';
+import { type ModuleDescriptor, type ModuleToolDescriptor } from '@/shared/protocol';
 
 export interface BridgeEvents {
   onRegistration: (modules: ModuleDescriptor[]) => void;

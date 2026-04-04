@@ -1,10 +1,12 @@
 import { createElement, useEffect, useMemo, useRef } from 'react';
 
-import type { ToolRequest } from '../shared/protocol';
+import { type ToolHandler } from '@/client/models/types';
+import { McpConnection } from '@/client/utils/connection';
+import { ModuleRunner } from '@/client/utils/moduleRunner';
+import { type ToolRequest } from '@/shared/protocol';
+
 import { McpContext } from './McpContext';
-import { McpConnection } from './connection';
-import { ModuleRunner } from './module-runner';
-import type { McpContextValue, McpProviderProps, ToolHandler } from './types';
+import { type McpContextValue, type McpProviderProps } from './types';
 
 const DEFAULT_PORT = 8347;
 

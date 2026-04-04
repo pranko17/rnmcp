@@ -1,21 +1,26 @@
 // Client (safe for React Native)
 export { McpContext, McpProvider, useMcpState, useMcpTool } from './client/index';
-export type { McpContextValue, McpModule, McpProviderProps, ToolHandler } from './client/index';
+export {
+  type McpContextValue,
+  type McpModule,
+  type McpProviderProps,
+  type ToolHandler,
+} from './client/index';
 
 // Modules (safe for React Native)
 export { navigationModule } from './modules/index';
 
 // Protocol types
-export type {
-  ClientMessage,
-  ModuleDescriptor,
-  ModuleToolDescriptor,
-  RegistrationMessage,
-  ServerMessage,
-  StateRemoveMessage,
-  StateUpdateMessage,
-  ToolRegisterMessage,
-  ToolRequest,
-  ToolResponse,
-  ToolUnregisterMessage,
+export {
+  type ClientMessage,
+  type ModuleDescriptor,
+  type ModuleToolDescriptor,
+  type RegistrationMessage,
+  type ServerMessage,
+  type StateRemoveMessage,
+  type StateUpdateMessage,
+  type ToolRegisterMessage,
+  type ToolRequest,
+  type ToolResponse,
+  type ToolUnregisterMessage,
 } from './shared/protocol';

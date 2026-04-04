@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, type DependencyList } from 'react';
 
-import { McpContext } from '../McpContext';
+import { McpContext } from '@/client/contexts/McpContext';
 
 const noop = () => {};
 

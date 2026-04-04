@@ -2,6 +2,7 @@
   "name": "react-native-mcp",
   "version": "0.1.0",
   "description": "MCP server for React Native app state",
+  "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -15,17 +16,33 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "lint": "eslint --ext .ts --ext .tsx ./src",
+    "lint:fix": "eslint --ext .ts --ext .tsx ./src --fix",
+    "lint:ts": "tsc --noEmit"
   },
   "packageManager": "yarn@1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610",
   "devDependencies": {
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-alias": "^1.1.2",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-sort-destructure-keys": "^3.0.0",
+    "eslint-plugin-sort-keys-fix": "^1.1.2",
+    "eslint-plugin-typescript-sort-keys": "^3.3.0",
+    "prettier": "^3.8.1",
     "typescript": "~5.7.0"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=19"
   },
   "peerDependenciesMeta": {
     "react": {

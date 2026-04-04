@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import { type ClientMessage, type ServerMessage } from '@/shared/protocol';
 
 const RECONNECT_INTERVAL = 3000;
 

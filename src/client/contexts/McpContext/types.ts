@@ -1,13 +1,6 @@
-export interface ToolHandler {
-  description: string;
-  handler: (args: Record<string, unknown>) => unknown | Promise<unknown>;
-  inputSchema?: Record<string, unknown>;
-}
+import { type ReactNode } from 'react';
 
-export interface McpModule {
-  name: string;
-  tools: Record<string, ToolHandler>;
-}
+import { type McpModule, type ToolHandler } from '@/client/models/types';
 
 export interface McpContextValue {
   registerTool: (name: string, tool: ToolHandler) => void;
@@ -17,7 +10,7 @@ export interface McpContextValue {
 }
 
 export interface McpProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
   modules?: McpModule[];
   port?: number;
 }

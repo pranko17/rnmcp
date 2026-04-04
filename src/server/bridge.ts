@@ -1,21 +1,25 @@
 import { randomUUID } from 'node:crypto';
 
 import { WebSocketServer } from 'ws';
-import type { WebSocket } from 'ws';
+import { type WebSocket } from 'ws';
 
-import type { ClientMessage, ToolRequest } from '../shared/protocol';
-import type { BridgeEvents } from './types';
+import { type ClientMessage, type ToolRequest } from '@/shared/protocol';
+
+import { type BridgeEvents } from './types';
 
 const REQUEST_TIMEOUT = 10_000;
 
 export class Bridge {
   private wss: WebSocketServer | null = null;
   private client: WebSocket | null = null;
-  private pendingRequests = new Map<string, {
-    reject: (reason: Error) => void;
-    resolve: (value: unknown) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
+  private pendingRequests = new Map<
+    string,
+    {
+      reject: (reason: Error) => void;
+      resolve: (value: unknown) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private events: Partial<BridgeEvents> = {};
 
   constructor(private readonly port: number) {}

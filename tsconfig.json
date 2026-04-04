@@ -7,6 +7,10 @@
     "lib": ["es2022"],
     "types": ["node"],
     "moduleResolution": "node10",
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "esModuleInterop": true,
     "sourceMap": true,
     "declaration": true,

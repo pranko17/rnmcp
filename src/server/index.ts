@@ -1,6 +1,6 @@
 import { Bridge } from './bridge';
-import { McpServerWrapper } from './mcp-server';
-import type { ServerConfig } from './types';
+import { McpServerWrapper } from './mcpServer';
+import { type ServerConfig } from './types';
 
 const DEFAULT_PORT = 8347;
 
@@ -31,4 +31,4 @@ export async function createServer(config?: ServerConfig): Promise<void> {
   await mcpServer.start();
 }
 
-export type { ServerConfig } from './types';
+export { type ServerConfig } from './types';

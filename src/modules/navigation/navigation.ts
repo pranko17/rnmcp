@@ -1,12 +1,6 @@
-import type { McpModule } from '../client/types';
+import { type McpModule } from '@/client/models/types';
 
-interface NavigationRef {
-  canGoBack: () => boolean;
-  getCurrentRoute: () => unknown;
-  getRootState: () => unknown;
-  goBack: () => void;
-  navigate: (screen: string, params?: Record<string, unknown>) => void;
-}
+import { type NavigationRef } from './types';
 
 export const navigationModule = (navigation: NavigationRef): McpModule => {
   return {

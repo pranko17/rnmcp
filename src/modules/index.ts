@@ -2,6 +2,7 @@ export { componentsModule } from './components';
 export { consoleModule } from './console';
 export { deviceModule } from './device';
 export { errorsModule } from './errors';
+export { i18nModule } from './i18n';
 export { navigationModule } from './navigation';
 export { networkModule } from './network';
 export { reactQueryModule } from './reactQuery';

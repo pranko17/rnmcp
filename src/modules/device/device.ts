@@ -76,6 +76,8 @@ export const deviceModule = (): McpModule => {
           const { Appearance, Dimensions, PixelRatio, Platform } = getRN();
           return {
             appearance: Appearance.getColorScheme(),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            dev: Boolean((globalThis as any).__DEV__),
             dimensions: {
               screen: Dimensions.get('screen'),
               window: Dimensions.get('window'),

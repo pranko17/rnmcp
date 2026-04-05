@@ -4,22 +4,27 @@
   "description": "Bidirectional MCP bridge connecting AI agents to running React Native apps",
   "license": "MIT",
   "author": "Aliaksei Pranko",
-  "homepage": "https://github.com/pranko17/react-native-mcp#readme",
+  "homepage": "https://github.com/pranko17/rnmcp#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pranko17/react-native-mcp.git"
+    "url": "https://github.com/pranko17/rnmcp.git"
   },
   "keywords": [
-    "react-native",
-    "mcp",
-    "model-context-protocol",
     "ai",
+    "ai-testing",
+    "agent",
+    "automation",
+    "claude",
     "debugging",
     "devtools",
-    "agent",
-    "claude",
     "fiber",
-    "inspection"
+    "inspection",
+    "mcp",
+    "model-context-protocol",
+    "react-native",
+    "rn",
+    "screenshot",
+    "testing"
   ],
   "files": [
     "dist",

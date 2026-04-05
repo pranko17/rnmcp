@@ -1,6 +1,8 @@
 import { type McpModule } from '@/client/models/types';
 
-import { type NavigationRef, type NavigationState } from './types';
+import { type NavigationHistoryEntry, type NavigationRef, type NavigationState } from './types';
+
+const MAX_HISTORY = 100;
 
 const findFocusedRoute = (state: NavigationState): unknown => {
   const route = state.routes[state.index];
@@ -14,10 +16,67 @@ const findFocusedRoute = (state: NavigationState): unknown => {
   return route;
 };
 
+const getCurrentRouteFromState = (
+  state: NavigationState
+): { key: string; name: string; params?: unknown } | null => {
+  const route = state.routes[state.index];
+  if (!route) return null;
+  if (route.state) {
+    return getCurrentRouteFromState(route.state);
+  }
+  return { key: route.key, name: route.name, params: route.params };
+};
+
 export const navigationModule = (navigation: NavigationRef): McpModule => {
+  const history: NavigationHistoryEntry[] = [];
+
+  // Record initial state
+  try {
+    const rootState = navigation.getRootState() as NavigationState | undefined;
+    if (rootState) {
+      const route = getCurrentRouteFromState(rootState);
+      if (route) {
+        history.push({
+          route,
+          state: rootState,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  } catch {
+    // Navigation not ready yet
+  }
+
+  // Subscribe to state changes
+  try {
+    navigation.addListener('state', () => {
+      const rootState = navigation.getRootState() as NavigationState | undefined;
+      if (!rootState) return;
+
+      const route = getCurrentRouteFromState(rootState);
+      if (!route) return;
+
+      // Skip duplicate entries
+      const last = history[history.length - 1];
+      if (last && last.route.key === route.key) return;
+
+      history.push({
+        route,
+        state: rootState,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (history.length > MAX_HISTORY) {
+        history.shift();
+      }
+    });
+  } catch {
+    // Navigation not ready yet
+  }
+
   return {
     description:
-      'React Navigation control: get current route/state, navigate, push, pop, replace, reset, go_back.',
+      'React Navigation control: get current route/state/history, navigate, push, pop, replace, reset, go_back.',
     name: 'navigation',
     tools: {
       get_current_route: {
@@ -33,6 +92,48 @@ export const navigationModule = (navigation: NavigationRef): McpModule => {
           const rootState = navigation.getRootState() as NavigationState | undefined;
           if (!rootState) return { error: 'No navigation state available' };
           return findFocusedRoute(rootState);
+        },
+      },
+      get_history: {
+        description:
+          'Get navigation history — a log of all screen transitions with timestamps. Use "full: true" to include full navigation state for each entry.',
+        handler: (args) => {
+          const offset = (args.offset as number) ?? 0;
+          const limit = (args.limit as number) ?? 50;
+          const full = (args.full as boolean) ?? false;
+
+          const slice = history.slice(offset, offset + limit);
+
+          if (full) {
+            return { entries: slice, offset, total: history.length };
+          }
+
+          return {
+            entries: slice.map((entry) => {
+              return {
+                key: entry.route.key,
+                name: entry.route.name,
+                params: entry.route.params,
+                timestamp: entry.timestamp,
+              };
+            }),
+            offset,
+            total: history.length,
+          };
+        },
+        inputSchema: {
+          full: {
+            description: 'Include full navigation state for each entry (default: false)',
+            type: 'boolean',
+          },
+          limit: {
+            description: 'Max entries to return (default: 50)',
+            type: 'number',
+          },
+          offset: {
+            description: 'Start index (default: 0)',
+            type: 'number',
+          },
         },
       },
       get_state: {

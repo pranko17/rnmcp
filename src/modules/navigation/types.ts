@@ -16,6 +16,8 @@ export interface NavigationAction {
 }
 
 export interface NavigationRef {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  addListener: (event: string, callback: (...args: any[]) => void) => () => void;
   canGoBack: () => boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dispatch: (action: any) => void;
@@ -26,4 +28,14 @@ export interface NavigationRef {
   navigate: (...args: any[]) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resetRoot: (...args: any[]) => void;
+}
+
+export interface NavigationHistoryEntry {
+  route: {
+    key: string;
+    name: string;
+    params?: unknown;
+  };
+  timestamp: string;
+  state?: NavigationState;
 }

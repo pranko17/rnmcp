@@ -14,9 +14,10 @@ Multiple React Native apps can connect simultaneously — each is identified by 
 ## How to interact
 
 1. Use \`connection_status\` to check which clients are connected.
-2. Use \`list_tools\` to see all available tools per client, with descriptions and examples.
-3. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked.
-4. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
+2. Use \`list_tools\` to browse all available tool names and short descriptions. The response is compact — modules that are structurally identical across multiple clients are deduplicated into a single entry with a \`clientIds\` array, and input schemas are omitted.
+3. Use \`describe_tool\` with \`{ tool, clientId? }\` to fetch the full input schema of a specific tool before calling it. Required when you need to know the argument shape. Host tools are resolved directly (no clientId needed). For in-app tools, omit \`clientId\` to auto-pick; specify it only when multiple clients have the same tool with different schemas.
+4. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked.
+5. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
 
 Some tools run inline on the MCP server host (e.g. \`host${MODULE_SEPARATOR}screenshot\`, \`host${MODULE_SEPARATOR}list_devices\`) and work even when no React Native client is connected. They use xcrun simctl / adb on the dev machine. When \`clientId\` is provided, host tools use that client's platform/label/deviceId as hints to resolve the target device; otherwise they prefer the device of the single connected client, falling back to the single booted sim / online device.
 `;
@@ -45,6 +46,85 @@ interface HostToolEntry {
   toolName: string;
   timeout?: number;
 }
+
+interface ToolDescriptorShape {
+  description: string;
+  name: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+/**
+ * Recursively serializes a value to JSON with sorted object keys, producing a
+ * stable canonical form that's safe to use as a dedup Map key. Arrays keep
+ * their original order — caller is responsible for normalizing them when
+ * order-independence is desired.
+ */
+const canonicalize = (value: unknown): string => {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        sorted[k] = (v as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
+};
+
+/**
+ * Produces a canonical key for a ToolGroup that's independent of tool
+ * registration order. Two modules with the same name + tools (regardless of
+ * order) + descriptions + schemas produce the same key.
+ */
+const canonicalizeGroup = (group: ToolGroup): string => {
+  const normalized = {
+    description: group.description,
+    module: group.module,
+    tools: [...group.tools].sort((a, b) => {
+      return a.name.localeCompare(b.name);
+    }),
+  };
+  return canonicalize(normalized);
+};
+
+/**
+ * Looks up a full tool descriptor on a client by its full name
+ * (`module__method`). Checks both static modules and dynamic tools registered
+ * via useMcpTool. Returns null if the tool is not on this client.
+ */
+const findToolInClient = (
+  client: ClientEntry,
+  toolFullName: string
+): ToolDescriptorShape | null => {
+  for (const mod of client.modules) {
+    const prefix = `${mod.name}${MODULE_SEPARATOR}`;
+    if (toolFullName.startsWith(prefix)) {
+      const methodName = toolFullName.slice(prefix.length);
+      const toolDef = mod.tools.find((t) => {
+        return t.name === methodName;
+      });
+      if (toolDef) {
+        return {
+          description: toolDef.description,
+          inputSchema: toolDef.inputSchema,
+          name: toolFullName,
+        };
+      }
+    }
+  }
+
+  const dynamicEntry = client.dynamicTools.get(toolFullName);
+  if (dynamicEntry) {
+    return {
+      description: dynamicEntry.description,
+      inputSchema: dynamicEntry.inputSchema,
+      name: toolFullName,
+    };
+  }
+
+  return null;
+};
 
 export class McpServerWrapper {
   private hostModules: HostModule[];
@@ -219,10 +299,52 @@ export class McpServerWrapper {
           title: 'List Tools',
         },
         description:
-          'List all tools registered by connected React Native clients, grouped by client then by module.',
+          'Browse available tools with compact (schema-free) descriptions. Modules with identical shape across multiple clients are deduplicated into a single entry with a clientIds array. Use describe_tool to fetch the full input schema for a specific tool before calling it.',
       },
       async () => {
         const clients = this.bridge.listClients();
+
+        // Dedup tool groups across clients by canonical shape
+        const dedupMap = new Map<string, { clientIds: string[]; group: ToolGroup }>();
+        for (const client of clients) {
+          const groups = this.buildToolGroups(client);
+          for (const group of groups) {
+            const key = canonicalizeGroup(group);
+            const existing = dedupMap.get(key);
+            if (existing) {
+              existing.clientIds.push(client.id);
+            } else {
+              dedupMap.set(key, { clientIds: [client.id], group });
+            }
+          }
+        }
+
+        const modulesPayload = [...dedupMap.values()].map(({ clientIds, group }) => {
+          return {
+            clientIds,
+            description: group.description,
+            name: group.module,
+            tools: group.tools.map((t) => {
+              return {
+                description: t.description,
+                name: t.name,
+              };
+            }),
+          };
+        });
+
+        const hostToolsPayload = this.hostModules.map((mod) => {
+          return {
+            description: mod.description,
+            name: mod.name,
+            tools: Object.entries(mod.tools).map(([toolName, tool]) => {
+              return {
+                description: tool.description,
+                name: `${mod.name}${MODULE_SEPARATOR}${toolName}`,
+              };
+            }),
+          };
+        });
 
         const clientsPayload = clients.map((client) => {
           return {
@@ -231,22 +353,7 @@ export class McpServerWrapper {
             deviceId: client.deviceId,
             id: client.id,
             label: client.label,
-            modules: this.buildToolGroups(client),
             platform: client.platform,
-          };
-        });
-
-        const hostToolsPayload = this.hostModules.map((mod) => {
-          return {
-            description: mod.description,
-            module: `${mod.name} (server)`,
-            tools: Object.entries(mod.tools).map(([toolName, tool]) => {
-              return {
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                name: `${mod.name}${MODULE_SEPARATOR}${toolName}`,
-              };
-            }),
           };
         });
 
@@ -254,11 +361,13 @@ export class McpServerWrapper {
           clientCount: number;
           clients: typeof clientsPayload;
           hostTools: typeof hostToolsPayload;
+          modules: typeof modulesPayload;
           clientError?: string;
         } = {
           clientCount: clients.length,
           clients: clientsPayload,
           hostTools: hostToolsPayload,
+          modules: modulesPayload,
         };
 
         if (clients.length === 0) {
@@ -417,6 +526,159 @@ export class McpServerWrapper {
             },
           ],
         };
+      }
+    );
+
+    this.mcp.registerTool(
+      'describe_tool',
+      {
+        annotations: {
+          readOnlyHint: true,
+          title: 'Describe Tool',
+        },
+        description:
+          'Fetch the full description and input schema for a single tool. Use this after list_tools to learn how to construct arguments for a tool before calling it. For host tools, clientId is ignored. For in-app tools, omit clientId to auto-pick the shared descriptor; specify it only when multiple clients have the same tool with different schemas.',
+        inputSchema: {
+          clientId: z
+            .string()
+            .optional()
+            .describe(
+              'Target client ID for in-app tools. Required only when multiple clients have the same tool with different schemas. Ignored for host tools.'
+            ),
+          tool: z
+            .string()
+            .describe(
+              `Full tool name in the format "module${MODULE_SEPARATOR}method" (e.g. "navigation${MODULE_SEPARATOR}navigate", "host${MODULE_SEPARATOR}screenshot").`
+            ),
+        },
+      },
+      async ({ clientId, tool }) => {
+        // 1. Host tool path — resolved via hostToolMap, clientId is ignored
+        const hostEntry = this.hostToolMap.get(tool);
+        if (hostEntry) {
+          const mod = this.hostModules.find((m) => {
+            return m.name === hostEntry.moduleName;
+          });
+          const hostTool = mod?.tools[hostEntry.toolName];
+          if (!hostTool) {
+            return jsonError(
+              `Host tool '${tool}' metadata inconsistent — entry in hostToolMap but missing from hostModules.`
+            );
+          }
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  {
+                    description: hostTool.description,
+                    inputSchema: hostTool.inputSchema,
+                    name: tool,
+                    scope: 'host',
+                  },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        // 2. Explicit clientId — look up the specific client
+        if (clientId) {
+          const client = this.bridge.getClient(clientId);
+          if (!client) {
+            const available =
+              this.bridge
+                .listClients()
+                .map((c) => {
+                  return c.id;
+                })
+                .join(', ') || '(none)';
+            return jsonError(`Client '${clientId}' not connected. Available: ${available}`);
+          }
+          const found = findToolInClient(client, tool);
+          if (!found) {
+            return jsonError(`Tool '${tool}' not found on client '${clientId}'.`);
+          }
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  {
+                    clientIds: [clientId],
+                    description: found.description,
+                    inputSchema: found.inputSchema,
+                    name: tool,
+                    scope: 'client',
+                  },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        // 3. Auto-pick across all connected clients
+        const clients = this.bridge.listClients();
+        const matches: Array<{ clientId: string; descriptor: ToolDescriptorShape }> = [];
+        for (const c of clients) {
+          const found = findToolInClient(c, tool);
+          if (found) {
+            matches.push({ clientId: c.id, descriptor: found });
+          }
+        }
+        if (matches.length === 0) {
+          return jsonError(
+            `Tool '${tool}' not found on any client. Use list_tools to see available tools.`
+          );
+        }
+
+        // Group by canonical descriptor shape — same shape across clients is not ambiguous
+        const byShape = new Map<string, { clientIds: string[]; descriptor: ToolDescriptorShape }>();
+        for (const match of matches) {
+          const key = canonicalize(match.descriptor);
+          const existing = byShape.get(key);
+          if (existing) {
+            existing.clientIds.push(match.clientId);
+          } else {
+            byShape.set(key, { clientIds: [match.clientId], descriptor: match.descriptor });
+          }
+        }
+
+        if (byShape.size === 1) {
+          const [first] = byShape.values();
+          const { clientIds, descriptor } = first!;
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  {
+                    clientIds,
+                    description: descriptor.description,
+                    inputSchema: descriptor.inputSchema,
+                    name: tool,
+                    scope: 'client',
+                  },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+
+        const candidates = [...byShape.values()]
+          .map(({ clientIds }) => {
+            return clientIds.join('+');
+          })
+          .join('; ');
+        return jsonError(
+          `Tool '${tool}' exists on multiple clients with different schemas: ${candidates}. Specify clientId.`
+        );
       }
     );
   }

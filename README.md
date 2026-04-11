@@ -20,7 +20,6 @@ AI Agent  --stdio/MCP-->  MCP Server (Node.js)  --WebSocket-->  RN App (device)
   - [navigation](#navigation)
   - [network](#network)
   - [reactQuery](#reactquery)
-  - [screenshot](#screenshot)
   - [storage](#storage)
 - [Hooks](#hooks)
   - [useMcpState](#usemcpstate)
@@ -37,9 +36,8 @@ AI Agent  --stdio/MCP-->  MCP Server (Node.js)  --WebSocket-->  RN App (device)
 
 ## Features
 
-- **11 built-in modules** — navigation, fiber tree, screenshot, network, console, storage, device, errors, i18next, React Query, alerts
+- **10 built-in modules** — navigation, fiber tree, network, console, storage, device, errors, i18next, React Query, alerts
 - **React fiber inspection** — walk the component tree, read props, invoke callbacks, call ref methods
-- **Screenshots** — capture app screenshots via `@shopify/react-native-skia` with resize and JPEG compression
 - **Developer hooks** — expose state and tools from any component with `useMcpState` and `useMcpTool`
 - **Navigation history** — full log of screen transitions with timestamps and slice access
 - **Modular** — register only the modules you need, or write your own with `description` for AI context
@@ -67,7 +65,6 @@ import {
   fiberTreeModule,
   navigationModule,
   networkModule,
-  screenshotModule,
 } from 'react-native-mcp-kit';
 import { createRef } from 'react';
 import { View } from 'react-native';
@@ -85,7 +82,6 @@ client.registerModules([
   fiberTreeModule({ rootRef }),
   navigationModule(navigationRef),
   networkModule(),
-  screenshotModule({ rootRef }),
 ]);
 ```
 
@@ -150,7 +146,6 @@ Or with a custom port:
 | [navigation](#navigation) | `navigationModule(ref)`         | Navigation state, history, navigate, push, pop, replace, reset  |
 | [network](#network)       | `networkModule(options?)`       | HTTP request/response interception                              |
 | [reactQuery](#reactquery) | `reactQueryModule(queryClient)` | React Query cache inspection and management                     |
-| [screenshot](#screenshot) | `screenshotModule({ rootRef })` | Capture screenshots via Skia                                    |
 | [storage](#storage)       | `storageModule(...storages)`    | Key-value storage inspection (MMKV, AsyncStorage, custom)       |
 
 ---
@@ -462,47 +457,6 @@ call(tool: "query__get_data", args: '{"key": "[\"users\",\"list\"]"}')
 
 // Invalidate all user queries
 call(tool: "query__invalidate", args: '{"key": "users"}')
-```
-
----
-
-### screenshot
-
-Capture screenshots of the app via `@shopify/react-native-skia`. Requires Skia as a peer dependency.
-
-```bash
-yarn add @shopify/react-native-skia
-```
-
-```typescript
-import { createRef } from 'react';
-import { View } from 'react-native';
-
-const rootRef = createRef<View>();
-
-client.registerModules([screenshotModule({ rootRef })]);
-
-// JSX — rootRef must have collapsable={false}
-<View ref={rootRef} collapsable={false} style={{ flex: 1 }}>
-  {/* app */}
-</View>
-```
-
-| Tool      | Description        | Args                                                              |
-| --------- | ------------------ | ----------------------------------------------------------------- |
-| `capture` | Capture screenshot | `format?: 'jpeg'\|'png'`, `quality?: number`, `maxWidth?: number` |
-
-Default: JPEG, quality 80, max width 600px (height scales proportionally). Images are resized via `Skia.Surface.Make` + `drawImageRectOptions` for optimal size.
-
-```typescript
-// Default (JPEG, 600px wide)
-call(tool: "screenshot__capture")
-
-// High quality PNG
-call(tool: "screenshot__capture", args: '{"format": "png", "quality": 100}')
-
-// Smaller image
-call(tool: "screenshot__capture", args: '{"maxWidth": 400, "quality": 50}')
 ```
 
 ---

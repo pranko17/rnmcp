@@ -93,12 +93,25 @@ export const deviceModule = (): McpModule => {
       },
 
       get_dimensions: {
-        description: 'Get screen and window dimensions (width, height, scale, fontScale)',
+        description:
+          'Get screen and window dimensions in BOTH logical DP and physical pixels. `screen`/`window` hold the raw React Native values (DP, with scale/fontScale). `screenPixels`/`windowPixels` are width/height multiplied by `pixelRatio` — these match what host__tap / adb shell input tap consume.',
         handler: () => {
-          const { Dimensions } = getRN();
+          const { Dimensions, PixelRatio } = getRN();
+          const ratio = PixelRatio.get();
+          const screen = Dimensions.get('screen');
+          const window = Dimensions.get('window');
           return {
-            screen: Dimensions.get('screen'),
-            window: Dimensions.get('window'),
+            pixelRatio: ratio,
+            screen,
+            screenPixels: {
+              height: Math.round(screen.height * ratio),
+              width: Math.round(screen.width * ratio),
+            },
+            window,
+            windowPixels: {
+              height: Math.round(window.height * ratio),
+              width: Math.round(window.width * ratio),
+            },
           };
         },
       },

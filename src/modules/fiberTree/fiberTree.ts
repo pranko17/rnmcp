@@ -12,6 +12,7 @@ import {
   getComponentName,
   getFiberRoot,
   getNativeInstance,
+  measureFiber,
   serializeFiber,
   serializeProps,
   setRootRef,
@@ -122,6 +123,12 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
 - within: "LoginForm" — search only inside LoginForm
 - within: "Button:1/Pressable" — nested path with index
 
+## Coordinates (host__tap targets)
+- Pass \`withBounds: true\` to find_all or get_component to receive \`bounds: {x, y, width, height, centerX, centerY}\` in PHYSICAL PIXELS.
+- Use bounds.centerX/centerY directly with host__tap — no PixelRatio math, no screenshot scaling.
+- bounds is null/absent only when the component has no host view yet (unmounted, virtualized off-screen).
+- Off by default because measuring adds a native bridge round-trip per match — opt in only when you need tap coordinates.
+
 ## Tips
 - mcpId is stable across renders (format: ComponentName:file:line)
 - Use find_all first to discover available components, then invoke on them
@@ -180,8 +187,8 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
       },
       find_all: {
         description:
-          'Find all components matching a query (by testID, name, text, or props presence). Supports within for scoped search.',
-        handler: (args) => {
+          'Find all components matching a query (by testID, name, text, or props presence). Supports within for scoped search. Pass withBounds: true to also receive physical-pixel bounds for each match — use bounds.centerX/centerY directly with host__tap.',
+        handler: async (args) => {
           const rootError = requireRoot();
           if (rootError) return rootError;
           let root = getFiberRoot()!;
@@ -202,15 +209,19 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
             text: args.text as string | undefined,
           };
 
+          const withBounds = args.withBounds === true;
           const fibers = findAllByQuery(root, query);
-          return fibers.map((fiber) => {
-            return {
-              mcpId: fiber.memoizedProps?.['data-mcp-id'],
-              name: getComponentName(fiber),
-              props: serializeProps(fiber.memoizedProps),
-              testID: fiber.memoizedProps?.testID,
-            };
-          });
+          return Promise.all(
+            fibers.map(async (fiber) => {
+              return {
+                bounds: withBounds ? await measureFiber(fiber) : undefined,
+                mcpId: fiber.memoizedProps?.['data-mcp-id'],
+                name: getComponentName(fiber),
+                props: serializeProps(fiber.memoizedProps),
+                testID: fiber.memoizedProps?.testID,
+              };
+            })
+          );
         },
         inputSchema: {
           hasProps: {
@@ -221,6 +232,11 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
           name: { description: 'Component name to match', type: 'string' },
           testID: { description: 'testID to match', type: 'string' },
           text: { description: 'Text content to match (substring)', type: 'string' },
+          withBounds: {
+            description:
+              'When true, include physical-pixel bounds {x, y, width, height, centerX, centerY} for each match. Pass bounds.centerX/centerY to host__tap. Off by default — measure adds a native bridge round-trip per match.',
+            type: 'boolean',
+          },
           within: FIND_SCHEMA.within,
         },
       },
@@ -243,8 +259,9 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
         },
       },
       get_component: {
-        description: 'Find a component by testID, name, or text and return its details',
-        handler: (args) => {
+        description:
+          'Find a component by testID, name, or text and return its details. Pass withBounds: true to include physical-pixel bounds on the root of the returned tree — use bounds.centerX/centerY directly with host__tap.',
+        handler: async (args) => {
           const rootError = requireRoot();
           if (rootError) return rootError;
           const root = getFiberRoot()!;
@@ -263,7 +280,14 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
           if (!fiber) return { error: 'Component not found' };
 
           const depth = (args.depth as number) || DEFAULT_DEPTH;
-          return serializeFiber(fiber, depth);
+          const serialized = serializeFiber(fiber, depth);
+          if (serialized && args.withBounds === true) {
+            const bounds = await measureFiber(fiber);
+            if (bounds) {
+              serialized.bounds = bounds;
+            }
+          }
+          return serialized;
         },
         inputSchema: {
           depth: { description: 'Max depth to traverse children (default: 3)', type: 'number' },
@@ -271,6 +295,11 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
           name: { description: 'Component name to search for', type: 'string' },
           testID: { description: 'testID to search for', type: 'string' },
           text: { description: 'Text content to search for', type: 'string' },
+          withBounds: {
+            description:
+              'When true, include physical-pixel bounds on the root of the returned tree. Pass bounds.centerX/centerY to host__tap. Off by default — measure adds a native bridge round-trip.',
+            type: 'boolean',
+          },
         },
       },
       get_props: {
@@ -327,7 +356,7 @@ export const fiberTreeModule = (options?: FiberTreeModuleOptions): McpModule => 
       },
       invoke: {
         description:
-          'Call any callback prop on a component found by testID, name, or text. Use this to simulate press, scroll, text input, or any other interaction.',
+          'Call any callback prop on a component found by testID, name, or text. Use this to simulate press, scroll, text input, or any other interaction. Preferred over host__tap for any React-rendered component — calls the prop directly without going through the OS gesture pipeline.',
         handler: (args) => {
           const rootError = requireRoot();
           if (rootError) return rootError;

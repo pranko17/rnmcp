@@ -1,4 +1,9 @@
-import { type ComponentQuery, type ComponentType, type SerializedComponent } from './types';
+import {
+  type Bounds,
+  type ComponentQuery,
+  type ComponentType,
+  type SerializedComponent,
+} from './types';
 
 // Fiber tag constants
 const HOST_COMPONENT = 5;
@@ -393,6 +398,67 @@ export const getNativeInstance = (fiber: Fiber): unknown => {
   }
 
   return null;
+};
+
+// Measure the on-screen rect of the host view backing a fiber, in PHYSICAL
+// pixels (top-left origin). Uses `UIManager.measure(node, cb)` which yields
+// `pageX/pageY` — coordinates relative to the React root view, mapped to
+// `View.getLocationOnScreen` on Android. This is what `adb shell input tap`
+// expects (and `xcrun simctl io ... tap` on iOS), unlike `measureInWindow`
+// whose origin is the visible window and shifts depending on translucent
+// status-bar / SafeArea insets.
+//
+// Returns null when the fiber has no mounted host view (unmounted, virtualized
+// off-screen, etc.) or when measure throws.
+export const measureFiber = async (fiber: Fiber): Promise<Bounds | null> => {
+  const hostFiber = findHostFiber(fiber);
+  if (!hostFiber?.stateNode) return null;
+
+  // Mirror the Fabric / old-arch fork from getNativeInstance.
+  const canonical = hostFiber.stateNode.canonical;
+  const instance = canonical?.publicInstance ?? hostFiber.stateNode;
+  if (!instance) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const RN = require('react-native');
+  const { PixelRatio, UIManager, findNodeHandle } = RN;
+  const handle: number | null =
+    typeof findNodeHandle === 'function' ? findNodeHandle(instance) : null;
+  if (handle == null) return null;
+
+  return new Promise((resolve) => {
+    try {
+      UIManager.measure(
+        handle,
+        (_x: number, _y: number, width: number, height: number, pageX: number, pageY: number) => {
+          if (
+            !Number.isFinite(pageX) ||
+            !Number.isFinite(pageY) ||
+            !Number.isFinite(width) ||
+            !Number.isFinite(height)
+          ) {
+            resolve(null);
+            return;
+          }
+          const ratio = PixelRatio.get();
+          const px = Math.round(pageX * ratio);
+          const py = Math.round(pageY * ratio);
+          const pw = Math.round(width * ratio);
+          const ph = Math.round(height * ratio);
+          resolve({
+            centerX: Math.round(px + pw / 2),
+            centerY: Math.round(py + ph / 2),
+            height: ph,
+            width: pw,
+            x: px,
+            y: py,
+          });
+        }
+      );
+    } catch {
+      resolve(null);
+    }
+  });
 };
 
 export const getAvailableMethods = (instance: unknown): string[] => {

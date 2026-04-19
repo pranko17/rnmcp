@@ -139,11 +139,43 @@ LEVELS
       },
       get_logs: {
         description:
-          'Current LogBox rows — { index, level, category, message, count, stack? }. Index feeds dismiss.',
-        handler: () => {
-          return getLogsArray().map((log, i) => {
+          'Current LogBox rows — { index, level, category, message, count, stack? }. Index feeds dismiss. Filter by level / limit / offset; pass includeStack: false to drop the stack array (keep index + message only) when doing a lean overview.',
+        handler: (args) => {
+          let rows = getLogsArray().map((log, i) => {
             return serializeLog(log, i);
           });
+          if (typeof args.level === 'string') {
+            const level = args.level;
+            rows = rows.filter((r) => {
+              return r.level === level;
+            });
+          }
+          if (typeof args.offset === 'number') {
+            rows = rows.slice(args.offset);
+          }
+          if (typeof args.limit === 'number') {
+            rows = rows.slice(0, args.limit);
+          }
+          if (args.includeStack === false) {
+            rows = rows.map((r) => {
+              const { stack, ...rest } = r;
+              return rest;
+            });
+          }
+          return rows;
+        },
+        inputSchema: {
+          includeStack: {
+            description: 'Include the structured stack array. Default true.',
+            type: 'boolean',
+          },
+          level: {
+            description: 'Filter by level.',
+            examples: ['warn', 'error', 'fatal', 'syntax'],
+            type: 'string',
+          },
+          limit: { description: 'Max rows to return.', type: 'number' },
+          offset: { description: 'Skip the first N rows.', type: 'number' },
         },
       },
       ignore: {

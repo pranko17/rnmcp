@@ -1,11 +1,20 @@
 export type ErrorSource = 'global' | 'promise';
 
+export interface StackFrame {
+  column?: number;
+  file?: string;
+  lineNumber?: number;
+  methodName?: string;
+}
+
 export interface ErrorEntry {
+  id: number;
   isFatal: boolean;
   message: string;
   source: ErrorSource;
   timestamp: string;
   stack?: string;
+  stackFrames?: StackFrame[];
 }
 
 export interface ErrorsModuleOptions {

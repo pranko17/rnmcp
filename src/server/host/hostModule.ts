@@ -3,6 +3,7 @@ import { screenshotTool } from './tools/capture';
 import { listDevicesTool } from './tools/devices';
 import { pressKeyTool, swipeTool, tapTool, typeTextTool } from './tools/input';
 import { launchAppTool, restartAppTool, terminateAppTool } from './tools/lifecycle';
+import { symbolicateTool } from './tools/symbolicate';
 import { type HostModule } from './types';
 
 export const hostModule = (runner: ProcessRunner): HostModule => {
@@ -27,6 +28,7 @@ COORDINATES
       restart_app: restartAppTool(runner),
       screenshot: screenshotTool(runner),
       swipe: swipeTool(runner),
+      symbolicate: symbolicateTool(),
       tap: tapTool(runner),
       terminate_app: terminateAppTool(runner),
       type_text: typeTextTool(runner),

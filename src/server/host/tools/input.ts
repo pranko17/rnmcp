@@ -18,7 +18,8 @@ const SWIPE_DURATION_MAX_MS = 5_000;
 const LONG_PRESS_DURATION_DEFAULT_MS = 700;
 const DRAG_HOLD_DEFAULT_MS = 500;
 const DRAG_MOVE_DEFAULT_MS = 400;
-const BATCH_FOCUS_DELAY_MS = 150;
+const BATCH_FOCUS_DELAY_DEFAULT_MS = 400;
+const BATCH_FOCUS_DELAY_MAX_MS = 5_000;
 
 const ANDROID_KEYCODES: Record<string, string> = {
   back: 'KEYCODE_BACK',
@@ -470,8 +471,7 @@ interface BatchField {
 
 export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
   return {
-    description:
-      'Fill multiple text fields in one call. Each field: { x, y, text, submit? }. For each entry — tap to focus, wait briefly for the keyboard, type via existing type_text semantics (select-all → paste on iOS; adb input text on Android), optionally submit. Stops on the first error and returns { filled, failedAt, error? }.',
+    description: `Fill multiple text fields in one call. Each field: { x, y, text, submit? }. For each entry — tap to focus, wait focusDelayMs (default ${BATCH_FOCUS_DELAY_DEFAULT_MS}ms), then type via existing type_text semantics (select-all → paste on iOS; adb input text on Android). Stops on the first error and returns { filled, failedAt, error? }. Bump focusDelayMs to 500-800 when the tap triggers a screen transition (e.g. searchBar → search screen) and the input needs time to mount.`,
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -481,6 +481,11 @@ export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
       if (!Array.isArray(fields) || fields.length === 0) {
         return { error: "'fields' must be a non-empty array of { x, y, text, submit? }." };
       }
+
+      const focusDelayMs =
+        typeof args.focusDelayMs === 'number' && Number.isFinite(args.focusDelayMs)
+          ? Math.max(0, Math.min(BATCH_FOCUS_DELAY_MAX_MS, Math.floor(args.focusDelayMs)))
+          : BATCH_FOCUS_DELAY_DEFAULT_MS;
 
       const results: Array<{ submitted: boolean; x: number; y: number }> = [];
 
@@ -510,10 +515,14 @@ export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
           return { error: focused.error, failedAt: i, filled: results.length };
         }
 
-        // Give the soft keyboard a beat to come up before typing.
-        await new Promise((r) => {
-          return setTimeout(r, BATCH_FOCUS_DELAY_MS);
-        });
+        // Give the soft keyboard (or a screen transition to a search-style
+        // view) a beat to come up before typing. Tunable per-call because
+        // navigation-triggering taps need more than in-place input focus.
+        if (focusDelayMs > 0) {
+          await new Promise((r) => {
+            return setTimeout(r, focusDelayMs);
+          });
+        }
 
         const typed =
           resolved.device.platform === 'ios'
@@ -531,7 +540,7 @@ export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
     inputSchema: {
       fields: {
         description:
-          'Ordered list of { x, y, text, submit? } entries. Each entry taps the coordinate to focus the input, waits briefly for the keyboard, then types the text.',
+          'Ordered list of { x, y, text, submit? } entries. Each entry taps the coordinate to focus the input, waits focusDelayMs, then types the text.',
         examples: [
           [
             { text: 'alice@example.com', x: 120, y: 400 },
@@ -539,6 +548,10 @@ export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
           ],
         ],
         type: 'array',
+      },
+      focusDelayMs: {
+        description: `Delay between tap and type. Default ${BATCH_FOCUS_DELAY_DEFAULT_MS}. Clamped 0..${BATCH_FOCUS_DELAY_MAX_MS}. Use 0 to skip when the input is already focused.`,
+        type: 'number',
       },
       platform: PLATFORM_ARG_SCHEMA,
       ...NATIVE_ID_SCHEMA,

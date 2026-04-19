@@ -17,7 +17,7 @@ export const PROTOCOL_VERSION = 1;
 /** WebSocket close code used when the server refuses the client over protocol mismatch. */
 export const WS_CLOSE_PROTOCOL_MISMATCH = 4010;
 
-// === RN App → Server: при подключении регистрирует модули ===
+// === RN App → Server: registers modules on connection ===
 
 export interface ModuleToolDescriptor {
   description: string;
@@ -68,7 +68,7 @@ export interface VersionMismatchMessage {
   clientVersion?: number;
 }
 
-// === Server → RN App: вызов tool ===
+// === Server → RN App: tool invocation ===
 
 export interface ToolRequest {
   args: Record<string, unknown>;
@@ -78,7 +78,7 @@ export interface ToolRequest {
   type: 'tool_request';
 }
 
-// === RN App → Server: результат ===
+// === RN App → Server: tool result ===
 
 export interface ToolResponse {
   id: string;
@@ -87,7 +87,7 @@ export interface ToolResponse {
   result?: unknown;
 }
 
-// === RN App → Server: state updates (от useMcpState) ===
+// === RN App → Server: state updates (from useMcpState) ===
 
 export interface StateUpdateMessage {
   key: string;
@@ -100,7 +100,7 @@ export interface StateRemoveMessage {
   type: 'state_remove';
 }
 
-// === RN App → Server: динамическая регистрация tool (от useMcpTool) ===
+// === RN App → Server: dynamic tool registration (from useMcpTool) ===
 
 export interface ToolRegisterMessage {
   module: string;

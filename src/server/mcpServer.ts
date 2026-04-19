@@ -14,7 +14,7 @@ Multiple React Native apps can connect simultaneously — each is identified by 
 ## How to interact
 
 1. Use \`connection_status\` to check which clients are connected.
-2. Use \`list_tools\` to browse all available tool names and short descriptions. The response is compact — modules that are structurally identical across multiple clients are deduplicated into a single entry with a \`clientIds\` array, and input schemas are omitted.
+2. Use \`list_tools\` to browse all available tool names and short descriptions. The response is compact — modules that are structurally identical across multiple clients are deduplicated into a single entry with a \`clientIds\` array, and input schemas are omitted. Narrow the listing with \`{ module }\` or \`{ clientId }\`, or pass \`{ compact: true }\` to drop module-level descriptions.
 3. Use \`describe_tool\` with \`{ tool, clientId? }\` to fetch the full input schema of a specific tool before calling it. Required when you need to know the argument shape. Host tools are resolved directly (no clientId needed). For in-app tools, omit \`clientId\` to auto-pick; specify it only when multiple clients have the same tool with different schemas.
 4. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked.
 5. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
@@ -306,16 +306,40 @@ export class McpServerWrapper {
           title: 'List Tools',
         },
         description:
-          'Browse available tools with compact (schema-free) descriptions. Modules with identical shape across multiple clients are deduplicated into a single entry with a clientIds array. Use describe_tool to fetch the full input schema for a specific tool before calling it.',
+          'Browse available tools with compact (schema-free) descriptions. Modules with identical shape across multiple clients are deduplicated into a single entry with a clientIds array. Use describe_tool to fetch the full input schema for a specific tool before calling it. Pass `module` to narrow to one module, `clientId` to narrow to one client, `compact: true` to drop long module-level descriptions.',
+        inputSchema: {
+          clientId: z
+            .string()
+            .optional()
+            .describe('Narrow listing to a single client. Omit for all connected clients.'),
+          compact: z
+            .boolean()
+            .optional()
+            .describe(
+              'Drop module-level descriptions (still keeps per-tool one-liners). Default false.'
+            ),
+          module: z
+            .string()
+            .optional()
+            .describe(
+              'Narrow listing to a single module name (e.g. "fiber_tree", "host"). Omit for all.'
+            ),
+        },
       },
-      async () => {
-        const clients = this.bridge.listClients();
+      async ({ clientId, compact, module }) => {
+        const allClients = this.bridge.listClients();
+        const clients = clientId
+          ? allClients.filter((c) => {
+              return c.id === clientId;
+            })
+          : allClients;
 
         // Dedup tool groups across clients by canonical shape
         const dedupMap = new Map<string, { clientIds: string[]; group: ToolGroup }>();
         for (const client of clients) {
           const groups = this.buildToolGroups(client);
           for (const group of groups) {
+            if (module && group.module !== module) continue;
             const key = canonicalizeGroup(group);
             const existing = dedupMap.get(key);
             if (existing) {
@@ -329,7 +353,7 @@ export class McpServerWrapper {
         const modulesPayload = [...dedupMap.values()].map(({ clientIds, group }) => {
           return {
             clientIds,
-            description: group.description,
+            description: compact ? undefined : group.description,
             name: group.module,
             tools: group.tools.map((t) => {
               return {
@@ -340,18 +364,22 @@ export class McpServerWrapper {
           };
         });
 
-        const hostToolsPayload = this.hostModules.map((mod) => {
-          return {
-            description: mod.description,
-            name: mod.name,
-            tools: Object.entries(mod.tools).map(([toolName, tool]) => {
-              return {
-                description: tool.description,
-                name: `${mod.name}${MODULE_SEPARATOR}${toolName}`,
-              };
-            }),
-          };
-        });
+        const hostToolsPayload = this.hostModules
+          .filter((mod) => {
+            return !module || mod.name === module;
+          })
+          .map((mod) => {
+            return {
+              description: compact ? undefined : mod.description,
+              name: mod.name,
+              tools: Object.entries(mod.tools).map(([toolName, tool]) => {
+                return {
+                  description: tool.description,
+                  name: `${mod.name}${MODULE_SEPARATOR}${toolName}`,
+                };
+              }),
+            };
+          });
 
         const clientsPayload = clients.map((client) => {
           return {

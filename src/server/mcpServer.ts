@@ -18,7 +18,8 @@ Multiple React Native apps can connect simultaneously — each is identified by 
 3. Use \`describe_tool\` with \`{ tool, clientId? }\` to fetch the full input schema of a specific tool before calling it. Required when you need to know the argument shape. Host tools are resolved directly (no clientId needed). For in-app tools, omit \`clientId\` to auto-pick; specify it only when multiple clients have the same tool with different schemas.
 4. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked.
 5. Use \`wait_until\` to poll any tool until a predicate over its result holds (or timeout). Replaces "screenshot in a loop + sleep" for things like "wait for screen X", "wait for the spinner to disappear", "wait for network to idle".
-6. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
+6. Use \`assert\` for a single-shot checkpoint after actions — same predicate vocabulary as wait_until, returns { pass, actual, expected?, result? }. Natural pair: do action → wait_until → assert.
+7. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
 
 Some tools run inline on the MCP server host (e.g. \`host${MODULE_SEPARATOR}screenshot\`, \`host${MODULE_SEPARATOR}list_devices\`, \`host${MODULE_SEPARATOR}launch_app\`, \`host${MODULE_SEPARATOR}terminate_app\`, \`host${MODULE_SEPARATOR}restart_app\`) and work even when no React Native client is connected. They use xcrun simctl / adb on the dev machine. When \`clientId\` is provided, host tools use that client's platform/label/deviceId as hints to resolve the target device; otherwise they prefer the device of the single connected client, falling back to the single booted sim / online device. \`launch_app\`, \`terminate_app\`, and \`restart_app\` accept an \`appId\` arg (iOS bundle ID / Android package name); omit it to reuse the target client's registered \`bundleId\` from its connection metadata.
 
@@ -419,6 +420,90 @@ RETURNS
               type: 'text' as const,
             },
           ],
+        };
+      }
+    );
+
+    this.mcp.registerTool(
+      'assert',
+      {
+        annotations: {
+          openWorldHint: true,
+          title: 'Assert',
+        },
+        description: `Single-shot assertion over a tool's result. Same predicate vocabulary as wait_until, but one attempt and a standardized diff on failure.
+
+Returns { pass: true, actual } on success,
+or { pass: false, actual, expected, op, path?, message?, result } on failure,
+or { pass: false, error } when the tool dispatch itself threw.
+
+Useful after wait_until as a checkpoint — the pair reads "do action → wait → assert" which produces a clean audit trail in session logs.`,
+        inputSchema: {
+          args: z.string().optional().describe('Arguments for the asserted tool, as JSON string.'),
+          clientId: z.string().optional().describe('Target client ID, same semantics as `call`.'),
+          message: z
+            .string()
+            .optional()
+            .describe(
+              'Optional human-readable description of the check; echoed in the failure payload.'
+            ),
+          predicate: z
+            .object({
+              op: z.enum([
+                'contains',
+                'equals',
+                'exists',
+                'gt',
+                'gte',
+                'lt',
+                'lte',
+                'notContains',
+                'notEquals',
+                'notExists',
+              ]),
+              path: z.string().optional(),
+              value: z.unknown().optional(),
+            })
+            .describe(
+              'Predicate to apply to the tool result. `path` drills into the result; omit to evaluate the whole result.'
+            ),
+          tool: z
+            .string()
+            .describe(`Tool name to call once (e.g. "fiber_tree${MODULE_SEPARATOR}query").`),
+        },
+      },
+      async ({ args, clientId, message, predicate, tool }) => {
+        let parsedArgs: Record<string, unknown> = {};
+        if (args) {
+          try {
+            parsedArgs = JSON.parse(args) as Record<string, unknown>;
+          } catch {
+            return jsonError('Invalid JSON in args');
+          }
+        }
+        const dispatch = await this.dispatchTool(tool, parsedArgs, clientId);
+        if (!dispatch.ok) {
+          return {
+            content: [
+              {
+                text: JSON.stringify({ error: dispatch.error, message, pass: false }, null, 2),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+        const actual = resolvePath(dispatch.result, predicate.path);
+        const pass = evalPredicate(actual, predicate.op, predicate.value);
+        const payload: Record<string, unknown> = { actual, pass };
+        if (!pass) {
+          payload.expected = predicate.value;
+          payload.op = predicate.op;
+          if (predicate.path) payload.path = predicate.path;
+          if (message) payload.message = message;
+          payload.result = dispatch.result;
+        }
+        return {
+          content: [{ text: JSON.stringify(payload, null, 2), type: 'text' as const }],
         };
       }
     );

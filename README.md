@@ -147,6 +147,10 @@ Wrap your whole app in it — every optional prop opts a module in when supplied
 
 The Node server itself exposes a small set of entry-point tools for agents: discovering connected clients, browsing what they can do, reading state exposed via `useMcpState`, and dispatching any in-app tool through `call`. Agents see these straight through the MCP interface; you don't register or configure anything on your side.
 
+## Multi-client
+
+One server can hold multiple RN clients at once — iOS simulator, Android emulator, physical device, any mix. Useful for driving iOS and Android builds of the same app in lockstep from a single agent session.
+
 ## Host tools (device-level control)
 
 When the `host` module is enabled (the default), the server also exposes tools that operate **on the host machine** — they run `adb` / `xcrun simctl` / a bundled `ios-hid` binary. These work even when the RN app is frozen, not launched yet, or between reloads.

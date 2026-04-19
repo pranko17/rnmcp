@@ -450,14 +450,15 @@ fibers in that scope:
 - \`hasProps\` — array of prop names that must exist on the fiber.
 - \`props\` — map of prop name → expected value. The matcher can be:
     · a primitive → strict equality ({ disabled: false }, { count: 3 });
-    · \`{ contains: "X" }\` → substring match. Coerces the actual value to a
-      string first, so it works on text-like props (placeholder,
-      accessibilityLabel, title) AND on numbers / anything else whose
-      toString() is useful.
-    · \`{ regex: "pattern" }\` → full regex test against String(value). Same
-      any-value coercion — can match numeric fields with \`^\\d+$\`, string
-      fields with arbitrary patterns, etc. Invalid patterns never match
-      instead of throwing.
+    · \`{ contains: "X" }\` / \`{ regex: "Y" }\` → substring / regex match
+      against String(value). Applies only to primitive values by default;
+      non-primitive props (objects/arrays/functions) don't match.
+    · Same with \`deep: true\` → opts the matcher into JSON-serialized values
+      for objects/arrays (circular-safe, functions/symbols replaced, length
+      capped). Use it when you need to reach inside nested prop values, e.g.
+      \`{ item: { contains: "\\"title\\":\\"Hello\\"", deep: true } }\` hits
+      a prop like { item: { title: "Hello" } }.
+    · Invalid regex never matches instead of throwing.
   Example: { placeholder: { contains: "Search" }, testID: { regex: "^item-\\\\d+$" }, count: 3 }.
 
 If a step matches more than one fiber, every match is forwarded to the
@@ -524,7 +525,7 @@ host__tap coordinates, omit "props" to cut response size.`,
           },
           steps: {
             description:
-              'Ordered list of query steps. Each step: { scope?, name?, mcpId?, testID?, text?, hasProps?, props?, index? }. props matches by value — primitive = strict equality, { contains: "X" } = substring match, { regex: "pattern" } = regex test. contains/regex both coerce the actual value to String() first, so they work on any value (strings, numbers, anything). scope defaults to "descendants" on every step. See the tool description for end-to-end examples.',
+              'Ordered list of query steps. Each step: { scope?, name?, mcpId?, testID?, text?, hasProps?, props?, index? }. props matches by value — primitive = strict equality, { contains: "X" } = substring, { regex: "pattern" } = regex. contains/regex default to primitives only; add `deep: true` to also match inside objects/arrays (JSON-serialized). scope defaults to "descendants" on every step. See the tool description for examples.',
             type: 'array',
           },
         },

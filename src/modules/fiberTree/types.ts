@@ -24,12 +24,21 @@ export interface SerializedComponent {
 /**
  * Per-prop match specification used in `ComponentQuery.props`.
  * - primitive → strict equality (good for typed props like `disabled: false`)
- * - `{ contains: str }` → substring match. Value is coerced via String(value),
- *   so it works on strings, numbers, or anything whose toString() is useful.
- * - `{ regex: pattern }` → full regex test against String(value). Invalid
- *   patterns don't throw, they just never match.
+ * - `{ contains: str, deep?: boolean }` → substring match against String(value).
+ *   With `deep: true` the value is JSON-serialized first (circular-safe,
+ *   functions/symbols replaced, length capped), so nested values become
+ *   searchable — e.g. `{ contains: "\"title\":\"Hello\"", deep: true }` hits
+ *   a prop like `{ item: { title: "Hello" } }`. Without `deep`, non-primitive
+ *   values don't match.
+ * - `{ regex: pattern, deep?: boolean }` → full regex test against the same
+ *   string form. Invalid patterns don't throw, they just never match.
  */
-export type PropMatcher = boolean | number | string | { contains: string } | { regex: string };
+export type PropMatcher =
+  | boolean
+  | number
+  | string
+  | { contains: string; deep?: boolean }
+  | { regex: string; deep?: boolean };
 
 export interface ComponentQuery {
   hasProps?: string[];

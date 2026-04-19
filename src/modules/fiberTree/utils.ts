@@ -341,10 +341,58 @@ export const findByText = (root: Fiber, text: string): Fiber | null => {
   });
 };
 
+// Cap for object/array serialization used by contains/regex matchers.
+// Large fiber props (e.g. deep Redux state, Reanimated shared values) would
+// otherwise turn into megabyte-strings per fiber.
+const MATCH_STRING_CAP = 10_000;
+
+/**
+ * Turn any prop value into a string usable by `contains` / `regex` matchers.
+ * - Primitives and functions/symbols go through String(), preserving the
+ *   "substring on text props" intuition (e.g. placeholder = "Search" stays
+ *   "Search", not '"Search"').
+ * - Objects and arrays are JSON-serialized with circular refs replaced, so a
+ *   regex like `"title":"Hello"` or `\\bonPress\\b` can still land. Functions
+ *   and symbols become placeholders; bigint becomes its decimal string.
+ * - Output is capped at MATCH_STRING_CAP characters to keep response costs
+ *   bounded on large prop graphs.
+ */
+const stringifyForMatching = (value: unknown): string => {
+  if (value === null || value === undefined) return String(value);
+  const type = typeof value;
+  if (type !== 'object') return String(value);
+
+  try {
+    const seen = new WeakSet<object>();
+    const serialized = JSON.stringify(value, (_key, v) => {
+      if (v && typeof v === 'object') {
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+      }
+      if (typeof v === 'function') return '[Function]';
+      if (typeof v === 'symbol') return v.toString();
+      if (typeof v === 'bigint') return v.toString();
+      return v;
+    });
+    if (typeof serialized !== 'string') return String(value);
+    return serialized.length > MATCH_STRING_CAP
+      ? serialized.slice(0, MATCH_STRING_CAP)
+      : serialized;
+  } catch {
+    return String(value);
+  }
+};
+
 const matchPropValue = (actual: unknown, matcher: PropMatcher): boolean => {
   if (matcher !== null && typeof matcher === 'object') {
     if (actual === undefined || actual === null) return false;
-    const asString = String(actual);
+    const isPrimitive = typeof actual !== 'object';
+    const deep = (matcher as { deep?: boolean }).deep === true;
+    // Non-primitive values only participate when the caller opts in with
+    // `deep: true`. This keeps naive placeholder/testID matchers from
+    // accidentally hitting stringified objects.
+    if (!isPrimitive && !deep) return false;
+    const asString = isPrimitive ? String(actual) : stringifyForMatching(actual);
     if ('contains' in matcher && typeof matcher.contains === 'string') {
       return asString.includes(matcher.contains);
     }

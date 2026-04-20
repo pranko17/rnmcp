@@ -1,4 +1,5 @@
 import { type McpModule } from '@/client/models/types';
+import { applySlice, parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 import { type CapturedBody, type NetworkEntry, type NetworkModuleOptions } from './types';
 
@@ -410,7 +411,7 @@ cap, and redaction lists are configurable via networkModule options.`,
           let result = buffer.filter((e) => {
             return e.status === 'error';
           });
-          if (args.limit) result = result.slice(-(args.limit as number));
+          result = applySlice(result, parseSliceArg(args.slice));
           return project(result, args.includeBodies === true);
         },
         inputSchema: {
@@ -418,7 +419,12 @@ cap, and redaction lists are configurable via networkModule options.`,
             description: 'Include full body data in each entry. Default false.',
             type: 'boolean',
           },
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: {
+            description: sliceSchemaDescription(
+              'Default omitted → every failed request is returned.'
+            ),
+            type: 'array',
+          },
         },
       },
       get_pending: {
@@ -475,7 +481,7 @@ cap, and redaction lists are configurable via networkModule options.`,
               return e.url.includes(urlFilter);
             });
           }
-          if (args.limit) result = result.slice(-(args.limit as number));
+          result = applySlice(result, parseSliceArg(args.slice));
           return project(result, args.includeBodies === true);
         },
         inputSchema: {
@@ -483,11 +489,17 @@ cap, and redaction lists are configurable via networkModule options.`,
             description: 'Include full body data in each entry. Default false.',
             type: 'boolean',
           },
-          limit: { description: 'Max entries to return.', type: 'number' },
           method: {
             description: 'HTTP method filter.',
             examples: ['GET', 'POST', 'PUT', 'DELETE'],
             type: 'string',
+          },
+          slice: {
+            description: sliceSchemaDescription(
+              'Default omitted → every captured request is returned.'
+            ),
+            examples: [[-10], [-20, -10], [0, 50]],
+            type: 'array',
           },
           status: {
             description: 'Status filter.',

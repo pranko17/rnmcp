@@ -1,4 +1,5 @@
 import { type McpModule } from '@/client/models/types';
+import { applySlice, parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 import { type ConsoleModuleOptions, type LogEntry, type LogLevel } from './types';
 
@@ -112,14 +113,17 @@ export const consoleModule = (options?: ConsoleModuleOptions): McpModule => {
     };
   }
 
-  const filterByLevel = (level: LogLevel, limit?: number) => {
+  const filterByLevel = (level: LogLevel, slice: unknown) => {
     const filtered = buffer.filter((entry) => {
       return entry.level === level;
     });
-    if (limit) {
-      return filtered.slice(-limit);
-    }
-    return filtered;
+    return applySlice(filtered, parseSliceArg(slice));
+  };
+
+  const sliceSchema = {
+    description: sliceSchemaDescription('Default omitted → every matching entry is returned.'),
+    examples: [[-10], [-20, -10], [0, 50]],
+    type: 'array',
   };
 
   return {
@@ -140,32 +144,32 @@ Buffer size and captured levels are configurable via consoleModule options.`,
       get_debug: {
         description: 'Return console.debug entries.',
         handler: (args) => {
-          return filterByLevel('debug', args.limit as number | undefined);
+          return filterByLevel('debug', args.slice);
         },
         inputSchema: {
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: sliceSchema,
         },
       },
       get_errors: {
         description: 'Return console.error entries.',
         handler: (args) => {
-          return filterByLevel('error', args.limit as number | undefined);
+          return filterByLevel('error', args.slice);
         },
         inputSchema: {
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: sliceSchema,
         },
       },
       get_info: {
         description: 'Return console.info entries.',
         handler: (args) => {
-          return filterByLevel('info', args.limit as number | undefined);
+          return filterByLevel('info', args.slice);
         },
         inputSchema: {
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: sliceSchema,
         },
       },
       get_logs: {
-        description: 'Return all log entries, optionally filtered by level and limit.',
+        description: 'Return all log entries, optionally filtered by level and slice.',
         handler: (args) => {
           let result = [...buffer];
           if (args.level) {
@@ -173,10 +177,7 @@ Buffer size and captured levels are configurable via consoleModule options.`,
               return entry.level === (args.level as LogLevel);
             });
           }
-          if (args.limit) {
-            result = result.slice(-(args.limit as number));
-          }
-          return result;
+          return applySlice(result, parseSliceArg(args.slice));
         },
         inputSchema: {
           level: {
@@ -184,16 +185,16 @@ Buffer size and captured levels are configurable via consoleModule options.`,
             examples: ['log', 'warn', 'error', 'info', 'debug'],
             type: 'string',
           },
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: sliceSchema,
         },
       },
       get_warnings: {
         description: 'Return console.warn entries.',
         handler: (args) => {
-          return filterByLevel('warn', args.limit as number | undefined);
+          return filterByLevel('warn', args.slice);
         },
         inputSchema: {
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: sliceSchema,
         },
       },
     },

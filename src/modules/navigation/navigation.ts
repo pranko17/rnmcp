@@ -1,5 +1,6 @@
 import { type McpModule } from '@/client/models/types';
 import { findScreenFiberByRouteKey, getComponentName, getFiberRoot } from '@/modules/fiberTree';
+import { applySlice, parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 import { type NavigationHistoryEntry, type NavigationRef, type NavigationState } from './types';
 
@@ -173,20 +174,18 @@ SCREEN ENRICHMENT
       },
       get_history: {
         description:
-          'Screen transition log (up to 100 entries) with timestamps. Pass full:true for per-entry navigation state.',
+          'Screen transition log (up to 100 entries, oldest first) with timestamps. Pass full:true for per-entry navigation state.',
         handler: (args) => {
-          const offset = (args.offset as number) ?? 0;
-          const limit = (args.limit as number) ?? 50;
           const full = (args.full as boolean) ?? false;
-
-          const slice = history.slice(offset, offset + limit);
+          const slice = parseSliceArg(args.slice) ?? [-50];
+          const entries = applySlice(history, slice);
 
           if (full) {
-            return { entries: slice, offset, total: history.length };
+            return { entries, slice, total: history.length };
           }
 
           return {
-            entries: slice.map((entry) => {
+            entries: entries.map((entry) => {
               return {
                 key: entry.route.key,
                 name: entry.route.name,
@@ -194,7 +193,7 @@ SCREEN ENRICHMENT
                 timestamp: entry.timestamp,
               };
             }),
-            offset,
+            slice,
             total: history.length,
           };
         },
@@ -203,8 +202,11 @@ SCREEN ENRICHMENT
             description: 'Include full navigation state per entry (default: false).',
             type: 'boolean',
           },
-          limit: { description: 'Max entries to return (default: 50).', type: 'number' },
-          offset: { description: 'Start index (default: 0).', type: 'number' },
+          slice: {
+            description: sliceSchemaDescription('Default [-50] = the newest fifty transitions.'),
+            examples: [[-10], [-20, -10], [0, 50]],
+            type: 'array',
+          },
         },
       },
       get_state: {

@@ -1,4 +1,5 @@
 import { type McpModule } from '@/client/models/types';
+import { applySlice, parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 // Minimal shape of a LogBoxLog row, keeping only fields useful to an agent.
 interface SerializedLog {
@@ -139,7 +140,7 @@ LEVELS
       },
       get_logs: {
         description:
-          'Current LogBox rows — { index, level, category, message, count, stack? }. Index feeds dismiss. Filter by level / limit / offset; pass includeStack: false to drop the stack array (keep index + message only) when doing a lean overview.',
+          'Current LogBox rows — { index, level, category, message, count, stack? }. Index feeds dismiss. Filter by level + slice; pass includeStack: false to drop the stack array (keep index + message only) when doing a lean overview.',
         handler: (args) => {
           let rows = getLogsArray().map((log, i) => {
             return serializeLog(log, i);
@@ -150,12 +151,7 @@ LEVELS
               return r.level === level;
             });
           }
-          if (typeof args.offset === 'number') {
-            rows = rows.slice(args.offset);
-          }
-          if (typeof args.limit === 'number') {
-            rows = rows.slice(0, args.limit);
-          }
+          rows = applySlice(rows, parseSliceArg(args.slice));
           if (args.includeStack === false) {
             rows = rows.map((r) => {
               const { stack, ...rest } = r;
@@ -174,8 +170,13 @@ LEVELS
             examples: ['warn', 'error', 'fatal', 'syntax'],
             type: 'string',
           },
-          limit: { description: 'Max rows to return.', type: 'number' },
-          offset: { description: 'Skip the first N rows.', type: 'number' },
+          slice: {
+            description: sliceSchemaDescription(
+              'Default omitted → every matching row is returned.'
+            ),
+            examples: [[-10], [0, 20]],
+            type: 'array',
+          },
         },
       },
       ignore: {

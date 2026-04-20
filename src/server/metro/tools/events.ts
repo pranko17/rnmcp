@@ -1,8 +1,7 @@
 import { type HostToolHandler } from '@/server/host/types';
 import { getEventCapture } from '@/server/metro/eventCapture';
 import { resolveMetroUrl } from '@/server/metro/resolveMetroUrl';
-
-const DEFAULT_LIMIT = 50;
+import { parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 export const getEventsTool = (): HostToolHandler => {
   return {
@@ -19,10 +18,9 @@ Each event has \`{ id, receivedAt, type, data }\`; \`data\` is the raw Metro pay
 
       const type = args.type as string | string[] | undefined;
       const since = typeof args.since === 'number' ? args.since : undefined;
-      const rawLimit = typeof args.limit === 'number' ? args.limit : DEFAULT_LIMIT;
-      const limit = Math.max(0, Math.min(200, rawLimit));
+      const slice = parseSliceArg(args.slice) ?? [-50];
 
-      const result = capture.getEvents({ limit, since, type });
+      const result = capture.getEvents({ since, slice, type });
       return { metroUrl, ...result };
     },
     inputSchema: {
@@ -31,10 +29,6 @@ Each event has \`{ id, receivedAt, type, data }\`; \`data\` is the raw Metro pay
           'Target client ID — used to pick up the Metro URL the app was loaded from (falls back to `metroUrl` or the hardcoded default).',
         type: 'string',
       },
-      limit: {
-        description: `Max events to return (newest-last). Default ${DEFAULT_LIMIT}, max 200.`,
-        type: 'number',
-      },
       metroUrl: {
         description: `Base URL of the Metro dev server. Overrides the URL reported by the connected client. Default "http://localhost:8081".`,
         type: 'string',
@@ -42,6 +36,11 @@ Each event has \`{ id, receivedAt, type, data }\`; \`data\` is the raw Metro pay
       since: {
         description: 'Only return events with `receivedAt >= since` (ms since epoch).',
         type: 'number',
+      },
+      slice: {
+        description: sliceSchemaDescription('Default [-50] = the newest 50.'),
+        examples: [[-10], [-20, -10], [0]],
+        type: 'array',
       },
       type: {
         description:

@@ -1,4 +1,5 @@
 import { type McpModule } from '@/client/models/types';
+import { applySlice, parseSliceArg, sliceSchemaDescription } from '@/shared/slice';
 
 import {
   type ErrorEntry,
@@ -151,12 +152,7 @@ errorsModule options.`,
               });
             }
           }
-          if (typeof args.offset === 'number') {
-            result = result.slice(args.offset);
-          }
-          if (args.limit) {
-            result = result.slice(-(args.limit as number));
-          }
+          result = applySlice(result, parseSliceArg(args.slice));
           const includeStack = args.includeStack === true;
           return result.map((entry) => {
             if (includeStack) return entry;
@@ -171,12 +167,17 @@ errorsModule options.`,
               'Include the raw `stack` string alongside parsed `stackFrames`. Default false — stackFrames already carries the structured form for metro__symbolicate.',
             type: 'boolean',
           },
-          limit: { description: 'Max entries to return (applied last).', type: 'number' },
-          offset: { description: 'Skip the first N entries.', type: 'number' },
           since: {
             description: 'ISO timestamp — only entries at or after this point.',
             examples: ['2026-04-19T22:00:00.000Z'],
             type: 'string',
+          },
+          slice: {
+            description: sliceSchemaDescription(
+              'Default omitted → every matching entry is returned.'
+            ),
+            examples: [[-10], [-20, -10], [0, 50]],
+            type: 'array',
           },
           source: {
             description: 'Filter by source.',
@@ -192,16 +193,16 @@ errorsModule options.`,
       get_fatal: {
         description: 'Fatal errors only.',
         handler: (args) => {
-          let result = buffer.filter((e) => {
+          const result = buffer.filter((e) => {
             return e.isFatal;
           });
-          if (args.limit) {
-            result = result.slice(-(args.limit as number));
-          }
-          return result;
+          return applySlice(result, parseSliceArg(args.slice));
         },
         inputSchema: {
-          limit: { description: 'Max entries to return.', type: 'number' },
+          slice: {
+            description: sliceSchemaDescription('Default omitted → every fatal entry is returned.'),
+            type: 'array',
+          },
         },
       },
       get_stats: {

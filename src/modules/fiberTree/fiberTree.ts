@@ -31,6 +31,13 @@ const QUERY_LIMIT_DEFAULT = 50;
 const QUERY_LIMIT_MAX = 500;
 const QUERY_DEFAULT_FIELDS = ['mcpId', 'name', 'testID'];
 
+const WAIT_TIMEOUT_DEFAULT = 10_000;
+const WAIT_TIMEOUT_MAX = 60_000;
+const WAIT_INTERVAL_DEFAULT = 300;
+const WAIT_INTERVAL_MIN = 100;
+
+type WaitUntil = 'appear' | 'disappear';
+
 const FIND_SCHEMA = {
   index: {
     description: '0-based index when several components match (default: 0).',
@@ -566,7 +573,7 @@ TIPS
       },
       query: {
         description:
-          'Chain-based fiber search. Each step narrows the result set via `scope` + criteria; multiple matches fan out into the next step. Returns { matches, total, truncated? }. See the module description for scope, criteria, select and response reference.',
+          'Chain-based fiber search. Each step narrows the result set via `scope` + criteria; multiple matches fan out into the next step. Returns { matches, total, truncated? }. Pass `waitFor` to poll until an element appears or disappears (optionally requiring stability for N ms) instead of a single-shot read. See the module description for scope, criteria, select and response reference.',
         handler: async (args) => {
           const rootError = requireRoot();
           if (rootError) return rootError;
@@ -582,45 +589,8 @@ TIPS
               ? Math.min(Math.floor(args.limit), QUERY_LIMIT_MAX)
               : QUERY_LIMIT_DEFAULT;
           const dedup = args.dedup !== false;
-          const useCache = args.cache !== false;
+          const useCacheDefault = args.cache !== false;
           const onlyVisible = args.onlyVisible === true;
-
-          const runtime: QueryRuntime = { navigationRef, root };
-          const rawMatches = runCachedQuery(runtime, steps, useCache);
-          let all = dedup ? dedupAncestors(rawMatches) : rawMatches;
-
-          let visibleRect: { height: number; width: number } | null = null;
-          const boundsCache = new Map<Fiber, Bounds | null>();
-          const measure = async (fiber: Fiber): Promise<Bounds | null> => {
-            if (boundsCache.has(fiber)) return boundsCache.get(fiber) ?? null;
-            const b = await measureFiber(fiber);
-            boundsCache.set(fiber, b);
-            return b;
-          };
-
-          if (onlyVisible) {
-            visibleRect = getVisibleRect();
-            if (visibleRect) {
-              const rect = visibleRect;
-              const measured = await Promise.all(
-                all.map(async (fiber) => {
-                  return { bounds: await measure(fiber), fiber };
-                })
-              );
-              all = measured
-                .filter(({ bounds }) => {
-                  return bounds && intersectsRect(bounds, rect);
-                })
-                .map(({ fiber }) => {
-                  return fiber;
-                });
-            }
-          }
-
-          const total = all.length;
-          const truncated = total > limit;
-          const picked = truncated ? all.slice(0, limit) : all;
-
           const fields = new Set(
             Array.isArray(args.select) ? (args.select as string[]) : QUERY_DEFAULT_FIELDS
           );
@@ -628,40 +598,164 @@ TIPS
             ? new Set(args.propsInclude as string[])
             : null;
 
-          const matches = await Promise.all(
-            picked.map(async (fiber) => {
-              const result: Record<string, unknown> = {};
-              if (fields.has('bounds')) {
-                result.bounds = await measure(fiber);
-              }
-              if (fields.has('mcpId')) {
-                result.mcpId = fiber.memoizedProps?.['data-mcp-id'];
-              }
-              if (fields.has('name')) {
-                result.name = getComponentName(fiber);
-              }
-              if (fields.has('props')) {
-                const full = serializeProps(fiber.memoizedProps);
-                if (propsInclude) {
-                  const filtered: Record<string, unknown> = {};
-                  for (const key of propsInclude) {
-                    if (key in full) filtered[key] = full[key];
-                  }
-                  result.props = filtered;
-                } else {
-                  result.props = full;
-                }
-              }
-              if (fields.has('testID')) {
-                result.testID = fiber.memoizedProps?.testID;
-              }
-              return result;
-            })
-          );
+          const runtime: QueryRuntime = { navigationRef, root };
 
-          const response: Record<string, unknown> = { matches, total };
-          if (truncated) response.truncated = true;
-          return response;
+          const runOnce = async (
+            useCache: boolean
+          ): Promise<{ matches: Record<string, unknown>[]; total: number; truncated?: true }> => {
+            const rawMatches = runCachedQuery(runtime, steps, useCache);
+            let all = dedup ? dedupAncestors(rawMatches) : rawMatches;
+
+            const boundsCache = new Map<Fiber, Bounds | null>();
+            const measure = async (fiber: Fiber): Promise<Bounds | null> => {
+              if (boundsCache.has(fiber)) return boundsCache.get(fiber) ?? null;
+              const b = await measureFiber(fiber);
+              boundsCache.set(fiber, b);
+              return b;
+            };
+
+            if (onlyVisible) {
+              const visibleRect = getVisibleRect();
+              if (visibleRect) {
+                const rect = visibleRect;
+                const measured = await Promise.all(
+                  all.map(async (fiber) => {
+                    return { bounds: await measure(fiber), fiber };
+                  })
+                );
+                all = measured
+                  .filter(({ bounds }) => {
+                    return bounds && intersectsRect(bounds, rect);
+                  })
+                  .map(({ fiber }) => {
+                    return fiber;
+                  });
+              }
+            }
+
+            const total = all.length;
+            const truncated = total > limit;
+            const picked = truncated ? all.slice(0, limit) : all;
+
+            const matches = await Promise.all(
+              picked.map(async (fiber) => {
+                const result: Record<string, unknown> = {};
+                if (fields.has('bounds')) {
+                  result.bounds = await measure(fiber);
+                }
+                if (fields.has('mcpId')) {
+                  result.mcpId = fiber.memoizedProps?.['data-mcp-id'];
+                }
+                if (fields.has('name')) {
+                  result.name = getComponentName(fiber);
+                }
+                if (fields.has('props')) {
+                  const full = serializeProps(fiber.memoizedProps);
+                  if (propsInclude) {
+                    const filtered: Record<string, unknown> = {};
+                    for (const key of propsInclude) {
+                      if (key in full) filtered[key] = full[key];
+                    }
+                    result.props = filtered;
+                  } else {
+                    result.props = full;
+                  }
+                }
+                if (fields.has('testID')) {
+                  result.testID = fiber.memoizedProps?.testID;
+                }
+                return result;
+              })
+            );
+
+            return truncated ? { matches, total, truncated: true } : { matches, total };
+          };
+
+          const waitForRaw = args.waitFor as
+            | { interval?: number; stable?: number; timeout?: number; until?: unknown }
+            | undefined;
+
+          if (!waitForRaw || typeof waitForRaw !== 'object') {
+            return runOnce(useCacheDefault);
+          }
+
+          const until = waitForRaw.until;
+          if (until !== 'appear' && until !== 'disappear') {
+            return { error: 'waitFor.until must be "appear" or "disappear"' };
+          }
+          const waitUntil: WaitUntil = until;
+          const timeout = Math.min(
+            WAIT_TIMEOUT_MAX,
+            Math.max(0, waitForRaw.timeout ?? WAIT_TIMEOUT_DEFAULT)
+          );
+          const interval = Math.max(
+            WAIT_INTERVAL_MIN,
+            waitForRaw.interval ?? WAIT_INTERVAL_DEFAULT
+          );
+          const stable = Math.max(0, waitForRaw.stable ?? 0);
+          const predicate = (total: number): boolean => {
+            return waitUntil === 'appear' ? total >= 1 : total === 0;
+          };
+
+          const startedAt = Date.now();
+          const deadline = startedAt + timeout;
+          let attempts = 0;
+          let stableSince: number | null = null;
+          let lastResult = await runOnce(false);
+          attempts++;
+
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const now = Date.now();
+            const elapsedMs = now - startedAt;
+            const met = predicate(lastResult.total);
+
+            if (met) {
+              if (stable === 0) {
+                return {
+                  ...lastResult,
+                  attempts,
+                  elapsedMs,
+                  timedOut: false,
+                  until: waitUntil,
+                  waited: true,
+                };
+              }
+              if (stableSince === null) stableSince = now;
+              if (now - stableSince >= stable) {
+                return {
+                  ...lastResult,
+                  attempts,
+                  elapsedMs,
+                  stableFor: now - stableSince,
+                  timedOut: false,
+                  until: waitUntil,
+                  waited: true,
+                };
+              }
+            } else {
+              stableSince = null;
+            }
+
+            if (now >= deadline) {
+              return {
+                ...lastResult,
+                attempts,
+                elapsedMs,
+                timedOut: true,
+                until: waitUntil,
+                waited: true,
+              };
+            }
+
+            const remaining = deadline - now;
+            const sleepMs = Math.min(interval, Math.max(0, remaining));
+            await new Promise<void>((resolve) => {
+              return setTimeout(resolve, sleepMs);
+            });
+            lastResult = await runOnce(false);
+            attempts++;
+          }
         },
         inputSchema: {
           cache: {
@@ -710,6 +804,15 @@ TIPS
               [{ props: { placeholder: { contains: 'Search' } } }],
             ],
             type: 'array',
+          },
+          waitFor: {
+            description: `Poll the query until a predicate holds, instead of reading once. \`until\` selects the target state: "appear" waits for \`total >= 1\`, "disappear" waits for \`total === 0\`. \`timeout\` (default ${WAIT_TIMEOUT_DEFAULT}ms, max ${WAIT_TIMEOUT_MAX}ms) caps the wait. \`interval\` (default ${WAIT_INTERVAL_DEFAULT}ms, min ${WAIT_INTERVAL_MIN}ms) is the gap between polls. \`stable\` (default 0) requires the predicate to hold continuously for this many ms before returning — useful to ignore transient matches during screen transitions. Cache is always bypassed while polling. On success the response carries the usual query fields plus \`{ waited: true, until, attempts, elapsedMs, timedOut: false, stableFor? }\`; on timeout \`timedOut: true\` with the last observed matches.`,
+            examples: [
+              { until: 'appear' },
+              { timeout: 5000, until: 'disappear' },
+              { interval: 200, stable: 500, until: 'appear' },
+            ],
+            type: 'object',
           },
         },
       },

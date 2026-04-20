@@ -16,10 +16,11 @@ Multiple React Native apps can connect simultaneously — each is identified by 
 1. Use \`connection_status\` to check which clients are connected.
 2. Use \`list_tools\` to browse all available tool names and short descriptions. The response is compact — modules that are structurally identical across multiple clients are deduplicated into a single entry with a \`clientIds\` array, and input schemas are omitted. Narrow the listing with \`{ module }\` or \`{ clientId }\`, or pass \`{ compact: true }\` to drop module-level descriptions.
 3. Use \`describe_tool\` with \`{ tool, clientId? }\` to fetch the full input schema of a specific tool before calling it. Required when you need to know the argument shape. Host tools are resolved directly (no clientId needed). For in-app tools, omit \`clientId\` to auto-pick; specify it only when multiple clients have the same tool with different schemas.
-4. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked.
-5. Use \`wait_until\` to poll any tool until a predicate over its result holds (or timeout). Replaces "screenshot in a loop + sleep" for things like "wait for screen X", "wait for the spinner to disappear", "wait for network to idle".
+4. Use \`call\` to invoke any tool with format: module${MODULE_SEPARATOR}method (e.g. navigation${MODULE_SEPARATOR}navigate). When more than one client is connected, specify \`clientId\`. When exactly one client is connected, \`clientId\` is optional — it's auto-picked. \`args\` accepts either a plain object or a JSON string — prefer objects to avoid quote escaping.
+5. Use \`wait_until\` to poll any tool until a predicate over its result holds (or timeout). Replaces "screenshot in a loop + sleep" for things like "wait for screen X", "wait for the spinner to disappear", "wait for network to idle". Predicate supports compound forms: { all: [...] } (AND), { any: [...] } (OR), { not: predicate }.
 6. Use \`assert\` for a single-shot checkpoint after actions — same predicate vocabulary as wait_until, returns { pass, actual, expected?, result? }. Natural pair: do action → wait_until → assert.
-7. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
+7. Use \`tap_fiber\` to collapse "fiber_tree__query → host__tap at bounds" into one call. Pass fiber_tree steps; if exactly one fiber matches, its center is tapped. Ambiguous match returns the candidate list so you can add \`index\` or narrow the chain.
+8. Use \`state_list\` / \`state_get\` to read app state exposed via useMcpState. State is scoped per client; specify \`clientId\` when multiple clients are connected.
 
 Some tools run inline on the MCP server host (e.g. \`host${MODULE_SEPARATOR}screenshot\`, \`host${MODULE_SEPARATOR}list_devices\`, \`host${MODULE_SEPARATOR}launch_app\`, \`host${MODULE_SEPARATOR}terminate_app\`, \`host${MODULE_SEPARATOR}restart_app\`) and work even when no React Native client is connected. They use xcrun simctl / adb on the dev machine. When \`clientId\` is provided, host tools use that client's platform/label/deviceId as hints to resolve the target device; otherwise they prefer the device of the single connected client, falling back to the single booted sim / online device. \`launch_app\`, \`terminate_app\`, and \`restart_app\` accept an \`appId\` arg (iOS bundle ID / Android package name); omit it to reuse the target client's registered \`bundleId\` from its connection metadata.
 
@@ -89,7 +90,19 @@ type PredicateOp =
   | 'notEquals'
   | 'notExists';
 
-const evalPredicate = (actual: unknown, op: PredicateOp, expected: unknown): boolean => {
+/**
+ * Recursive predicate. Leaf form is { op, path?, value? }. Compound forms
+ * compose: { all: [...] } (AND), { any: [...] } (OR), { not: predicate }
+ * (negation). Compound forms can nest.
+ */
+interface LeafPredicate {
+  op: PredicateOp;
+  path?: string;
+  value?: unknown;
+}
+type Predicate = LeafPredicate | { all: Predicate[] } | { any: Predicate[] } | { not: Predicate };
+
+const evalLeaf = (actual: unknown, op: PredicateOp, expected: unknown): boolean => {
   switch (op) {
     case 'exists':
       return actual !== undefined && actual !== null;
@@ -124,6 +137,58 @@ const evalPredicate = (actual: unknown, op: PredicateOp, expected: unknown): boo
     default:
       return false;
   }
+};
+
+/**
+ * Evaluate a predicate (leaf or compound) against a result object. Compound
+ * forms short-circuit: all stops on first false, any stops on first true.
+ */
+const evalPredicate = (result: unknown, predicate: Predicate): boolean => {
+  if ('all' in predicate && Array.isArray(predicate.all)) {
+    for (const sub of predicate.all) {
+      if (!evalPredicate(result, sub)) return false;
+    }
+    return true;
+  }
+  if ('any' in predicate && Array.isArray(predicate.any)) {
+    for (const sub of predicate.any) {
+      if (evalPredicate(result, sub)) return true;
+    }
+    return false;
+  }
+  if ('not' in predicate && predicate.not && typeof predicate.not === 'object') {
+    return !evalPredicate(result, predicate.not);
+  }
+  const leaf = predicate as LeafPredicate;
+  if (typeof leaf.op !== 'string') return false;
+  return evalLeaf(resolvePath(result, leaf.path), leaf.op, leaf.value);
+};
+
+/**
+ * Parse a `call`-style args argument that may arrive as a JSON string (older
+ * clients) or a plain object (new form). Returns { ok, args } or { ok: false,
+ * error } on malformed JSON.
+ */
+const parseCallArgs = (
+  raw: unknown
+): { args: Record<string, unknown>; ok: true } | { error: string; ok: false } => {
+  if (raw === undefined || raw === null) return { args: {}, ok: true };
+  if (typeof raw === 'string') {
+    if (raw.length === 0) return { args: {}, ok: true };
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { args: parsed as Record<string, unknown>, ok: true };
+      }
+      return { error: 'Parsed args must be an object.', ok: false };
+    } catch {
+      return { error: 'Invalid JSON in args.', ok: false };
+    }
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return { args: raw as Record<string, unknown>, ok: true };
+  }
+  return { error: 'args must be an object or a JSON string.', ok: false };
 };
 
 interface HostToolEntry {
@@ -256,12 +321,14 @@ export class McpServerWrapper {
           title: 'Call Tool',
         },
         description:
-          'Call a tool registered by a React Native app client. Use list_tools first to see available tools. When multiple clients are connected, specify clientId; otherwise it is auto-picked.',
+          'Call a tool registered by a React Native app client. Use list_tools first to see available tools. When multiple clients are connected, specify clientId; otherwise it is auto-picked. `args` accepts either a plain object or a JSON string — objects are preferred to avoid escaping quotes.',
         inputSchema: {
           args: z
-            .string()
+            .union([z.string(), z.record(z.string(), z.unknown())])
             .optional()
-            .describe('Arguments as JSON string (e.g. {"screen": "AUTH_LOGIN_SCREEN"})'),
+            .describe(
+              'Tool arguments as a plain object (e.g. { screen: "AUTH_LOGIN_SCREEN" }) or a JSON string.'
+            ),
           clientId: z
             .string()
             .optional()
@@ -276,15 +343,9 @@ export class McpServerWrapper {
         },
       },
       async ({ args, clientId, tool }) => {
-        let parsedArgs: Record<string, unknown> = {};
-        if (args) {
-          try {
-            parsedArgs = JSON.parse(args) as Record<string, unknown>;
-          } catch {
-            return jsonError('Invalid JSON in args');
-          }
-        }
-        const dispatch = await this.dispatchTool(tool, parsedArgs, clientId);
+        const parsed = parseCallArgs(args);
+        if (!parsed.ok) return jsonError(parsed.error);
+        const dispatch = await this.dispatchTool(tool, parsed.args, clientId);
         if (!dispatch.ok) return jsonError(dispatch.error);
         return { content: this.formatResult(dispatch.result) };
       }
@@ -306,39 +367,34 @@ Replaces "screenshot in a loop + sleep" with a declarative check. Typical use:
   • wait for network.get_pending.length to hit 0
 
 PREDICATE
-  { path?: "dot.path.into.result", op, value? }
-  op: equals | notEquals | contains | notContains | exists | notExists | gt | gte | lt | lte
-  path resolves through objects and array indices; arrays also expose .length.
+  Leaf form: { op, path?, value? }
+    op: equals | notEquals | contains | notContains | exists | notExists | gt | gte | lt | lte
+    path drills through objects + array indices; arrays also expose .length.
+  Compound forms compose and nest:
+    { all: [predicate, ...] }   — AND
+    { any: [predicate, ...] }   — OR
+    { not: predicate }          — negation
+  Example: { all: [{op:"equals", path:"name", value:"CART"}, {op:"gt", path:"items.length", value:0}] }
 
 RETURNS
-  { ok: true, attempts, elapsedMs, lastResult } when the predicate holds, or
-  { ok: false, reason, attempts, elapsedMs, lastResult?, lastError? } on timeout.`,
+  { ok: true, attempts, elapsedMs, matched? } on success — matched is the path-
+    resolved value for leaf predicates, omitted for compound.
+  { ok: false, reason, attempts, elapsedMs, lastResult, lastError? } on timeout.`,
         inputSchema: {
-          args: z.string().optional().describe('Arguments for the polled tool, as JSON string.'),
+          args: z
+            .union([z.string(), z.record(z.string(), z.unknown())])
+            .optional()
+            .describe('Arguments for the polled tool — object or JSON string.'),
           clientId: z.string().optional().describe('Target client ID, same semantics as `call`.'),
           intervalMs: z
             .number()
             .optional()
             .describe('Delay between poll attempts. Default 300, min 50, max 5000.'),
           predicate: z
-            .object({
-              op: z.enum([
-                'contains',
-                'equals',
-                'exists',
-                'gt',
-                'gte',
-                'lt',
-                'lte',
-                'notContains',
-                'notEquals',
-                'notExists',
-              ]),
-              path: z.string().optional(),
-              value: z.unknown().optional(),
-            })
+            .object({})
+            .passthrough()
             .describe(
-              'Predicate to apply to the tool result. `path` drills into the result; omit to evaluate the whole result.'
+              'Leaf { op, path?, value? } or compound { all|any: [...] } / { not: predicate }. See tool description for ops and composition.'
             ),
           timeoutMs: z
             .number()
@@ -350,14 +406,11 @@ RETURNS
         },
       },
       async ({ args, clientId, intervalMs, predicate, timeoutMs, tool }) => {
-        let parsedArgs: Record<string, unknown> = {};
-        if (args) {
-          try {
-            parsedArgs = JSON.parse(args) as Record<string, unknown>;
-          } catch {
-            return jsonError('Invalid JSON in args');
-          }
-        }
+        const parsedArgs = parseCallArgs(args);
+        if (!parsedArgs.ok) return jsonError(parsedArgs.error);
+        const pred = predicate as Predicate;
+        const isLeaf = typeof (pred as LeafPredicate).op === 'string';
+        const leafPath = isLeaf ? (pred as LeafPredicate).path : undefined;
         const timeout = Math.max(500, Math.min(60_000, timeoutMs ?? 10_000));
         const interval = Math.max(50, Math.min(5_000, intervalMs ?? 300));
         const started = Date.now();
@@ -367,27 +420,20 @@ RETURNS
 
         while (Date.now() - started < timeout) {
           attempts += 1;
-          const dispatch = await this.dispatchTool(tool, parsedArgs, clientId);
+          const dispatch = await this.dispatchTool(tool, parsedArgs.args, clientId);
           if (dispatch.ok) {
             lastResult = dispatch.result;
-            const target = resolvePath(lastResult, predicate.path);
-            if (evalPredicate(target, predicate.op, predicate.value)) {
+            if (evalPredicate(lastResult, pred)) {
+              const payload: Record<string, unknown> = {
+                attempts,
+                elapsedMs: Date.now() - started,
+                ok: true,
+              };
+              if (isLeaf) {
+                payload.matched = resolvePath(lastResult, leafPath);
+              }
               return {
-                content: [
-                  {
-                    text: JSON.stringify(
-                      {
-                        attempts,
-                        elapsedMs: Date.now() - started,
-                        lastResult,
-                        ok: true,
-                      },
-                      null,
-                      2
-                    ),
-                    type: 'text' as const,
-                  },
-                ],
+                content: [{ text: JSON.stringify(payload, null, 2), type: 'text' as const }],
               };
             }
           } else {
@@ -431,15 +477,18 @@ RETURNS
           openWorldHint: true,
           title: 'Assert',
         },
-        description: `Single-shot assertion over a tool's result. Same predicate vocabulary as wait_until, but one attempt and a standardized diff on failure.
+        description: `Single-shot assertion over a tool's result. Same predicate vocabulary (including { all / any / not }) as wait_until, but one attempt and a standardized diff on failure.
 
-Returns { pass: true, actual } on success,
-or { pass: false, actual, expected, op, path?, message?, result } on failure,
-or { pass: false, error } when the tool dispatch itself threw.
+Returns { pass: true, actual? } on success — actual is the path-resolved value for leaf predicates, omitted for compound.
+Returns { pass: false, actual, expected?, op?, path?, message?, result } on predicate failure.
+Returns { pass: false, error, message? } when the tool dispatch itself threw.
 
 Useful after wait_until as a checkpoint — the pair reads "do action → wait → assert" which produces a clean audit trail in session logs.`,
         inputSchema: {
-          args: z.string().optional().describe('Arguments for the asserted tool, as JSON string.'),
+          args: z
+            .union([z.string(), z.record(z.string(), z.unknown())])
+            .optional()
+            .describe('Arguments for the asserted tool — object or JSON string.'),
           clientId: z.string().optional().describe('Target client ID, same semantics as `call`.'),
           message: z
             .string()
@@ -448,24 +497,10 @@ Useful after wait_until as a checkpoint — the pair reads "do action → wait �
               'Optional human-readable description of the check; echoed in the failure payload.'
             ),
           predicate: z
-            .object({
-              op: z.enum([
-                'contains',
-                'equals',
-                'exists',
-                'gt',
-                'gte',
-                'lt',
-                'lte',
-                'notContains',
-                'notEquals',
-                'notExists',
-              ]),
-              path: z.string().optional(),
-              value: z.unknown().optional(),
-            })
+            .object({})
+            .passthrough()
             .describe(
-              'Predicate to apply to the tool result. `path` drills into the result; omit to evaluate the whole result.'
+              'Leaf { op, path?, value? } or compound { all|any: [...] } / { not: predicate }. See wait_until for full semantics.'
             ),
           tool: z
             .string()
@@ -473,15 +508,9 @@ Useful after wait_until as a checkpoint — the pair reads "do action → wait �
         },
       },
       async ({ args, clientId, message, predicate, tool }) => {
-        let parsedArgs: Record<string, unknown> = {};
-        if (args) {
-          try {
-            parsedArgs = JSON.parse(args) as Record<string, unknown>;
-          } catch {
-            return jsonError('Invalid JSON in args');
-          }
-        }
-        const dispatch = await this.dispatchTool(tool, parsedArgs, clientId);
+        const parsedArgs = parseCallArgs(args);
+        if (!parsedArgs.ok) return jsonError(parsedArgs.error);
+        const dispatch = await this.dispatchTool(tool, parsedArgs.args, clientId);
         if (!dispatch.ok) {
           return {
             content: [
@@ -492,18 +521,157 @@ Useful after wait_until as a checkpoint — the pair reads "do action → wait �
             ],
           };
         }
-        const actual = resolvePath(dispatch.result, predicate.path);
-        const pass = evalPredicate(actual, predicate.op, predicate.value);
-        const payload: Record<string, unknown> = { actual, pass };
+        const pred = predicate as Predicate;
+        const isLeaf = typeof (pred as LeafPredicate).op === 'string';
+        const leafPath = isLeaf ? (pred as LeafPredicate).path : undefined;
+        const leafValue = isLeaf ? (pred as LeafPredicate).value : undefined;
+        const leafOp = isLeaf ? (pred as LeafPredicate).op : undefined;
+        const pass = evalPredicate(dispatch.result, pred);
+        const payload: Record<string, unknown> = { pass };
+        if (isLeaf) payload.actual = resolvePath(dispatch.result, leafPath);
         if (!pass) {
-          payload.expected = predicate.value;
-          payload.op = predicate.op;
-          if (predicate.path) payload.path = predicate.path;
+          if (isLeaf) {
+            payload.expected = leafValue;
+            payload.op = leafOp;
+            if (leafPath) payload.path = leafPath;
+          }
           if (message) payload.message = message;
           payload.result = dispatch.result;
         }
         return {
           content: [{ text: JSON.stringify(payload, null, 2), type: 'text' as const }],
+        };
+      }
+    );
+
+    this.mcp.registerTool(
+      'tap_fiber',
+      {
+        annotations: {
+          openWorldHint: true,
+          title: 'Tap Fiber',
+        },
+        description: `Locate a fiber via fiber_tree__query and tap its center through host__tap — one round-trip instead of two.
+
+Requires exactly one resolved match after the chain. Pass \`index\` when the chain legitimately yields multiple and you want the Nth (same semantics as fiber_tree__query's step-level index, but applied to the final match set). Pass \`scroll: true\` to bail out early with { tappable: false, reason: "off-screen", bounds } when the fiber is outside the viewport — the agent can then scroll_to before tapping.
+
+Returns { tapped: true, mcpId?, name, bounds, device } on success. On ambiguity: { error: "N matches, pass index or narrow steps", candidates: [...] }. On no match: { error: "no match" }. On unmounted (bounds null): { error: "fiber has no measurable host view" }.`,
+        inputSchema: {
+          clientId: z.string().optional().describe('Target client ID, same semantics as `call`.'),
+          index: z
+            .number()
+            .optional()
+            .describe('Pick the Nth match when the chain returns multiple (0-based).'),
+          steps: z
+            .array(z.record(z.string(), z.unknown()))
+            .describe('Same shape as fiber_tree__query steps — ordered criteria + optional scope.'),
+        },
+      },
+      async ({ clientId, index, steps }) => {
+        if (!Array.isArray(steps) || steps.length === 0) {
+          return jsonError('tap_fiber requires a non-empty `steps` array.');
+        }
+        const queryResult = await this.dispatchTool(
+          `fiber_tree${MODULE_SEPARATOR}query`,
+          { limit: 10, select: ['bounds', 'mcpId', 'name', 'testID'], steps },
+          clientId
+        );
+        if (!queryResult.ok) return jsonError(`fiber_tree__query failed: ${queryResult.error}`);
+        const result = queryResult.result as {
+          matches?: Array<{
+            bounds?: { centerX: number; centerY: number } | null;
+            mcpId?: string;
+            name?: string;
+            testID?: string;
+          }>;
+          total?: number;
+        };
+        const matches = result.matches ?? [];
+        if (matches.length === 0) {
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  { error: 'no match for given steps', total: result.total ?? 0 },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+        if (matches.length > 1 && typeof index !== 'number') {
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  {
+                    candidates: matches.map((m) => {
+                      return {
+                        bounds: m.bounds ?? null,
+                        mcpId: m.mcpId,
+                        name: m.name,
+                        testID: m.testID,
+                      };
+                    }),
+                    error: `${matches.length} matches — pass \`index\` or narrow \`steps\`.`,
+                    total: result.total ?? matches.length,
+                  },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+        const pick = matches[typeof index === 'number' ? index : 0];
+        if (!pick) {
+          return jsonError(`index ${index} out of range (have ${matches.length}).`);
+        }
+        if (!pick.bounds) {
+          return {
+            content: [
+              {
+                text: JSON.stringify(
+                  {
+                    error: 'fiber has no measurable host view — likely unmounted / virtualized.',
+                    mcpId: pick.mcpId,
+                    name: pick.name,
+                  },
+                  null,
+                  2
+                ),
+                type: 'text' as const,
+              },
+            ],
+          };
+        }
+        const tapResult = await this.dispatchTool(
+          `host${MODULE_SEPARATOR}tap`,
+          { x: pick.bounds.centerX, y: pick.bounds.centerY },
+          clientId
+        );
+        if (!tapResult.ok) return jsonError(`host__tap failed: ${tapResult.error}`);
+        return {
+          content: [
+            {
+              text: JSON.stringify(
+                {
+                  bounds: pick.bounds,
+                  device: (tapResult.result as { device?: unknown }).device,
+                  mcpId: pick.mcpId,
+                  name: pick.name,
+                  tapped: true,
+                  testID: pick.testID,
+                },
+                null,
+                2
+              ),
+              type: 'text' as const,
+            },
+          ],
         };
       }
     );

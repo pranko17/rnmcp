@@ -342,7 +342,14 @@ RESPONSE
 TIPS
   mcpId format "ComponentName:file:line" — stable across renders.
   Use query to locate, then invoke (bypasses gesture pipeline) or host__tap
-  with bounds (real OS touch) to act.`,
+  with bounds (real OS touch) to act. For one-shot real taps, tap_fiber
+  collapses both steps into a single call.
+  When stepping up via scope: "ancestors", prefer filtering by name (or
+  testID/mcpId) over guessing an index — ancestors count is brittle and
+  varies across RN versions.
+  \`text\` matches RENDERED text only — Text children content, not prop
+  values. To match "placeholder: Search" use \`props: { placeholder:
+  { contains: "Search" } }\`.`,
     name: 'fiber_tree',
     tools: {
       call_ref: {

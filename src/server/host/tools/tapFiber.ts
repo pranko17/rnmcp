@@ -17,7 +17,7 @@ const TAP_FIBER_TIMEOUT_MS = 10_000;
 
 export const tapFiberTool = (): HostToolHandler => {
   return {
-    description: `Locate a fiber via fiber_tree__query and tap its center through host__tap — one round-trip instead of two.
+    description: `The canonical way to simulate a user tap — locates a fiber via fiber_tree__query and taps its center through the real OS gesture pipeline, so Pressable feedback, gesture responders, and hit-test run as under a real finger. One call instead of query + host__tap.
 
 Requires exactly one resolved match after the chain. Pass \`index\` when the chain legitimately yields multiple and you want the Nth (0-based). When ambiguous without \`index\`, returns a candidate list with bounds so you can narrow \`steps\` or pick an index.
 

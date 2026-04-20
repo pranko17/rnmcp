@@ -525,7 +525,7 @@ TIPS
       },
       invoke: {
         description:
-          'Call a callback prop on a component (onPress, onChangeText, onValueChange, …). Bypasses the OS gesture pipeline — for real touch testing use host__tap with query bounds.',
+          "Call a prop's callback function directly from JS. For simulating a user tap, prefer host__tap_fiber — it runs the real OS gesture pipeline so Pressable feedback, gesture responders, and hit-test behave as under a real finger. invoke still works for any callback when you specifically want the JS-only path (component off-screen, skipping the gesture recognizer, or driving a non-gesture prop), but it is not the default for user-behavior simulation.",
         handler: (args) => {
           const rootError = requireRoot();
           if (rootError) return rootError;
@@ -559,7 +559,7 @@ TIPS
           },
           callback: {
             description: 'Callback prop name.',
-            examples: ['onPress', 'onChangeText', 'onValueChange'],
+            examples: ['onSkip', 'onUpdate', 'onCompleted'],
             type: 'string',
           },
         },

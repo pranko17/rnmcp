@@ -169,7 +169,7 @@ const pressKeyAndroid = (
 export const tapTool = (runner: ProcessRunner): HostToolHandler => {
   return {
     description:
-      'Tap at physical-pixel (x, y). Goes through the real OS gesture pipeline — prefer over fiber_tree__invoke when you want touch semantics (Pressable feedback, gesture responders, hit-test).',
+      'Primary way to deliver a tap to the app, at physical-pixel (x, y). Runs through the real OS gesture pipeline so Pressable feedback, gesture responders, and hit-test all fire. For a fiber-targeted tap without copying bounds by hand, prefer host__tap_fiber.',
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -207,7 +207,7 @@ export const tapTool = (runner: ProcessRunner): HostToolHandler => {
 export const swipeTool = (runner: ProcessRunner): HostToolHandler => {
   return {
     description:
-      'Swipe / scroll from (x1, y1) to (x2, y2) in physical pixels. durationMs default 300, clamped 50..5000.',
+      'Primary way to deliver a swipe / scroll gesture, from (x1, y1) to (x2, y2) in physical pixels. Runs through the OS gesture pipeline — Pan responders, scroll momentum, and gesture handlers all behave as under a finger. durationMs default 300, clamped 50..5000.',
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -284,7 +284,7 @@ export const swipeTool = (runner: ProcessRunner): HostToolHandler => {
 export const typeTextTool = (runner: ProcessRunner): HostToolHandler => {
   return {
     description:
-      "Type text into the focused input (replaces existing content — select-all then paste). submit:true presses ENTER after typing. iOS: unicode via clipboard paste, keyboard-layout immune. Android: ASCII only (adb input text limitation); for non-Latin scripts use fiber_tree__invoke on the input's onChangeText instead.",
+      "Primary way to type into the currently focused text input — replaces existing content (select-all then paste). submit:true presses ENTER after typing. iOS: unicode via clipboard paste, keyboard-layout immune. Android: ASCII only (adb input text limitation); for non-Latin scripts fall back to fiber_tree__invoke on the input's onChangeText.",
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -336,7 +336,7 @@ const clampLongPressDuration = (value: unknown): number => {
 export const longPressTool = (runner: ProcessRunner): HostToolHandler => {
   return {
     description:
-      'Hold a touch at (x, y) for durationMs without moving. Default 700ms — above the RN Pressable long-press threshold (~500ms) with margin. Internally: zero-distance swipe; the HID touch stays down for the full duration on both platforms.',
+      'Primary way to deliver a long-press: hold a touch at (x, y) for durationMs through the OS gesture pipeline. Default 700ms — above the RN Pressable long-press threshold (~500ms) with margin. Internally a zero-distance swipe kept alive for the full duration on both platforms.',
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -389,7 +389,7 @@ export const longPressTool = (runner: ProcessRunner): HostToolHandler => {
 export const dragTool = (runner: ProcessRunner): HostToolHandler => {
   return {
     description:
-      'Hold-then-drag gesture for swipe-to-delete, drag-to-reorder, pull-to-refresh-with-hold. Total gesture time is holdMs + durationMs (both platforms emit a single slow swipe — the hold is simulated by lingering near the start, not a true stop-then-move pause). When precise hold timing matters (e.g. iOS haptic long-press triggers), test + tune holdMs empirically.',
+      'Primary way to deliver a hold-then-drag gesture — swipe-to-delete, drag-to-reorder, pull-to-refresh-with-hold. Total gesture time = holdMs + durationMs (both platforms emit a single slow swipe — the hold is simulated by lingering near the start, not a true stop-then-move pause). When precise hold timing matters (e.g. iOS haptic long-press triggers), test + tune holdMs empirically.',
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {
@@ -471,7 +471,7 @@ interface BatchField {
 
 export const typeTextBatchTool = (runner: ProcessRunner): HostToolHandler => {
   return {
-    description: `Fill multiple text fields in one call. Each field: { x, y, text, submit? }. For each entry — tap to focus, wait focusDelayMs, then type via existing type_text semantics (select-all → paste on iOS; adb input text on Android). Stops on the first error and returns { filled, failedAt, error? }.
+    description: `Primary way to fill multiple text fields in one call. Each field: { x, y, text, submit? }. For each entry — tap to focus, wait focusDelayMs, then type via the same semantics as host__type_text (select-all → paste on iOS; adb input text on Android). Stops on the first error and returns { filled, failedAt, error? }.
 
 focusDelayMs default is ${BATCH_FOCUS_DELAY_DEFAULT_MS}ms — tuned for in-place TextInputs (login / signup forms, already-mounted fields). When the tap triggers a screen transition (e.g. searchBar → SearchScreen) the target input won't be mounted yet and the typed text is lost; bump focusDelayMs to 700-800. Set to 0 when the input is already focused.`,
     handler: async (args, ctx) => {
@@ -564,7 +564,7 @@ focusDelayMs default is ${BATCH_FOCUS_DELAY_DEFAULT_MS}ms — tuned for in-place
 
 export const pressKeyTool = (runner: ProcessRunner): HostToolHandler => {
   return {
-    description: `Press a hardware/semantic key. Accepted: ${KEY_NAMES.join(', ')}. iOS lacks back / menu / power / volume_up / volume_down.`,
+    description: `Primary way to press a hardware / semantic key — routes through the OS so native handlers (back, home, volume, etc.) fire. Accepted: ${KEY_NAMES.join(', ')}. iOS lacks back / menu / power / volume_up / volume_down.`,
     handler: async (args, ctx) => {
       const resolved = await resolveDevice(ctx, parseResolveOptions(args), runner);
       if (!resolved.ok) {

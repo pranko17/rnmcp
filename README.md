@@ -2,7 +2,7 @@
 
 **See, drive, and debug a running React Native app from an AI agent.**
 
-`react-native-mcp-kit` connects a running RN app (on simulator, emulator, or physical device) to any process that speaks the [Model Context Protocol](https://modelcontextprotocol.io). You wrap your app in one provider, add a babel plugin, point your AI tool at a small Node server that ships with the package, and every interesting thing inside the app becomes addressable: component trees, navigation state, network traffic, React Query cache, logs, errors, translations, storage — plus the OS gesture pipeline (taps, swipes, text input, screenshots) via a bundled binary that runs with zero external daemons.
+`react-native-mcp-kit` connects a running RN app — on simulator, emulator, or physical device — to any process that speaks the [Model Context Protocol](https://modelcontextprotocol.io). You wire it in once and the agent gets a concise, structured view of what's happening inside the running app: deep runtime-state analysis it can cross-reference in a single pass, full access to the React tree so it can find and reason about UI without screenshots and OCR, every kind of log the app produces, and simulation of real taps, swipes, and text input through the OS gesture pipeline. The whole surface is designed around what's cheap and fast for the agent to think about — lean responses by default, low vision-token cost on screenshots, a focused set of tools instead of overwhelming dumps.
 
 ```
 AI Agent / Cursor / Claude Code --stdio/MCP--> Node server --WebSocket--> RN app (device)
@@ -15,16 +15,16 @@ AI Agent / Cursor / Claude Code --stdio/MCP--> Node server --WebSocket--> RN app
 A few concrete scenarios this unlocks:
 
 - **Drive multiple devices in parallel from one agent session.** iOS simulator, Android emulator, physical device — any mix attaches to the same server. The agent can walk the same flow across platforms side-by-side, catching visual or behavioural regressions that show up on one OS but not the other, without ever leaving the editor.
-- **End-to-end automation without a separate test harness.** Describe a multi-step flow in natural language — "sign in, open settings, flip the notifications toggle, verify the confirmation toast" — and an agent walks it: locates components by name/testID, fires real taps through the OS gesture pipeline, asserts on the resulting state, and reports back.
-- **Interactive inspection of a live app from your editor.** Ask "what screen am I on?", "what React Query keys are stale?", "what did the last POST return?", "which translation keys are missing in the current locale?" — no rebuild, no DevTools panel, no "add more logs and reload" loop.
-- **Debug gesture-arbitration bugs that unit tests can't catch.** Taps go through the real iOS/Android touch pipeline, so issues like "the close button inside a horizontally-scrolling list swallows taps" surface naturally — and when you need to sidestep the pipeline (call a prop directly on a virtualised item, fire a callback on an offscreen component) the bridge offers that too.
-- **Expose your own inspection points from inside components.** A component can register a named state key or an ad-hoc tool from its own lifecycle. Agents then read feature-flag state, force a particular loading scenario, or trigger an internal-only action without you shipping a debug menu.
+- **End-to-end automation without a separate test harness.** Describe a multi-step flow in natural language — "sign in, open settings, flip the notifications toggle, verify the confirmation toast" — and the agent walks it: locates the right components, fires real taps through the OS gesture pipeline, asserts on the resulting state, and reports back.
+- **Interactive inspection of a live app from your editor.** Ask "what screen am I on?", "what's in the request cache?", "what did the last POST return?", "what values are in app state right now?" — no rebuild, no DevTools panel, no "add more logs and reload" loop.
+- **Debug gesture-arbitration bugs that unit tests can't catch.** Taps go through the real iOS/Android touch pipeline, so issues like "the close button inside a horizontally-scrolling list swallows taps" surface naturally — and when you need to sidestep the pipeline (call a prop directly, in a spot a real finger can't reach) the bridge offers that too.
+- **Expose your own inspection points from inside components.** A component can register a named state key or an ad-hoc action from its own lifecycle. Agents then read feature-flag state, force a particular loading scenario, or trigger an internal-only action without you shipping a debug menu.
 
-Everything the library adds to your bundle is stripped in production builds via the companion babel plugin — so you can wire it up once and leave it in, without shipping it to users.
+Everything the library adds to your bundle is stripped from production builds by default — wire it up once and leave it in, without shipping it to users.
 
 ## Example scenarios
 
-- **Deep runtime-state analysis on demand.** Ask "why is this screen blank?" or "why did the last submission fail?" — the agent cross-references the live React component tree (which components are mounted, their props and layout bounds, wrapper cascades, visible vs virtualised), the current navigation state, active data-fetching mutations, in-flight and recent network requests (with bodies + durations), captured errors with source-mapped stack traces, and any app-specific state the app has opted into exposing — all from the running runtime, no extra logging or rebuild. The same analysis can be scoped to specific moments ("state right after I tap submit") through built-in polling primitives, rather than a stale snapshot.
+- **Deep runtime-state analysis on demand.** Ask "why is this screen blank?" or "why did the last submission fail?" — the agent cross-references what's mounted in the UI, where the user is in the app, what the network has been doing, what errors fired, and any state the app has opted into exposing. All from the running runtime, no extra logging or rebuild. The same pass can be scoped to a specific moment ("state right after I tap submit") instead of a stale snapshot.
 - **Reproduce a bug from a ticket, fix it, verify the fix.** The agent reads the reproduction steps, drives the app into the failing state through real taps and swipes, confirms the bug, edits the relevant source, then replays the same sequence to verify the fix — all in one editor session, no rebuilds between steps.
 - **End-to-end flow narrated in plain language.** "Sign in, add an item to the cart, go through checkout, verify the total matches the expected value, screenshot the final screen, and give me a network traffic summary." The agent drives real taps, checks state at each step, snapshots the key screens, and hands back captured request counts / durations / errors as evidence.
 - **Cross-platform parity check.** One agent holds two connected clients, runs the same tap sequence on iOS and Android in parallel, captures screenshots, and points out the differences — catches platform-specific regressions after an RN upgrade, shared-component refactor, or native change.
@@ -72,7 +72,7 @@ export const App = () => {
 
 These modules register automatically on mount — no prop required:
 
-`alert`, `console`, `device`, `errors`, `network`, `fiber_tree`
+`alert`, `console`, `device`, `errors`, `log_box`, `network`, `fiber_tree`
 
 If the dependency lives deeper in the tree (e.g. the `QueryClient` is created inside a feature-specific provider), skip the prop and use `useMcpModule` there instead — see [Hooks](#hooks).
 
@@ -134,7 +134,19 @@ iOS simulators share localhost with the host machine, no forwarding needed.
 
 ### 4. Run
 
-Start Metro + your app. The `McpProvider` connects to `ws://localhost:8347` on mount. The agent calls `connection_status` to confirm; after that every tool is callable.
+Start Metro + your app. The `McpProvider` connects to `ws://localhost:8347` on mount.
+
+From your agent, a typical first session looks like:
+
+```
+connection_status
+ → { clientCount: 1, clients: [{ id: "ios-1", label: "iPhone 17 Pro", ... }] }
+
+list_tools { compact: true }
+ → catalog of every module registered by the app, grouped by client
+```
+
+After that, every tool is callable by name via `call`. If the server isn't running yet, the provider just retries silently — no crash, no error toast.
 
 ## `McpProvider` reference
 
@@ -154,7 +166,12 @@ Wrap your whole app in it — every optional prop opts a module in when supplied
 
 ## MCP server tools
 
-The Node server exposes a small set of entry-point tools agents use directly — you don't register or configure them. `call` / `list_tools` / `describe_tool` / `connection_status` / `state_get` / `state_list` cover discovery and dispatch, plus two test-automation helpers: `wait_until` (poll any tool until a predicate holds, replacing screenshot-in-a-loop + sleep) and `assert` (single-shot checkpoint with a standardized diff on failure). For UI-level waits (wait for a screen, a spinner to disappear, etc.), `fiber_tree__query` has a built-in `waitFor` option — see the [fiber_tree section](#fiber_tree).
+The Node server exposes a small set of entry-point tools agents use directly — you don't register or configure them:
+
+- **Discovery & dispatch** — `connection_status`, `list_tools`, `describe_tool`, `call`.
+- **Reactive state** — `state_get`, `state_list` (read values exposed via `useMcpState`).
+- **Test automation** — `wait_until` (poll any tool until a predicate holds, replacing screenshot-in-a-loop + sleep) and `assert` (single-shot checkpoint with a standardized diff on failure).
+- **UI-level waits** — `fiber_tree__query` has a built-in `waitFor: { until: "appear" | "disappear", stable? }` option; see the [fiber_tree section](#fiber_tree).
 
 ## Host tools (device-level control)
 
@@ -172,8 +189,9 @@ iOS input goes through a bundled `ios-hid` Swift binary that injects HID events 
 
 ## Metro tools (dev-server control plane)
 
-Separate module talking HTTP / WebSocket to the Metro instance the app was bundled from. The URL is auto-detected from each client's handshake (via RN's `getDevServer()`), so non-default ports and LAN-connected physical devices work without extra config.
+Separate module talking HTTP / WebSocket to the Metro instance the app was bundled from.
 
+- **Auto-detected URL per client.** Each attached app reports its actual Metro origin at handshake (via RN's `getDevServer()`). Non-default ports (`yarn start --port 8082`) and LAN-connected physical devices work without an explicit `metroUrl` arg.
 - **`metro__symbolicate`** — maps a raw Hermes / V8 stack trace back to source paths via Metro's `/symbolicate`. Pairs naturally with `errors__get_errors` and `log_box__get_logs` (each entry has parsed `stackFrames` ready to feed in).
 - **`metro__reload`** — triggers a full JS reload on every attached app (`POST /reload`).
 - **`metro__status`** — cheap ping before a chain of Metro calls.
@@ -258,7 +276,12 @@ Captures unhandled JS errors (via `ErrorUtils.setGlobalHandler`) and unhandled p
 
 ### fiber_tree
 
-The heart of UI inspection. Search the component tree via a chained `query`: each step narrows the result with criteria (name / testID / mcpId / text / props matcher / not / any) and a scope (descendants / ancestors / siblings / screen / nearest_host / …). Wrapper cascades (`PressableView → Pressable → View → RCTView`) collapse to the topmost by default. `bounds` come back in physical pixels and pair directly with `host__tap` — or use `host__tap_fiber` for the locate-and-tap shortcut.
+The heart of UI inspection. Search the component tree via a chained `query`: each step narrows the result by **criteria** within a given **scope**, with multiple matches fanning out into the next step.
+
+- **Criteria**: `name`, `testID`, `mcpId`, `text`, `hasProps`, `props` (equality + `contains`), `not`, `any`.
+- **Scopes**: `descendants`, `children`, `parent`, `ancestors`, `siblings`, `self`, `screen` (focused screen fiber from React Navigation), `nearest_host` (closest host component).
+
+Wrapper cascades (`PressableView → Pressable → View → RCTView`) collapse to the topmost by default, so overlapping matches don't drown the result. `bounds` come back in physical pixels and pair directly with `host__tap` — or use `host__tap_fiber` for the locate-and-tap shortcut.
 
 Pass `waitFor: { until: 'appear' | 'disappear', timeout?, interval?, stable? }` to poll the same query until the target state is reached — e.g. `waitFor: { until: 'appear', stable: 300 }` waits for a screen to mount and hold stable for 300ms. Response carries `{ waited, attempts, elapsedMs, timedOut, stableFor? }` alongside the usual matches.
 
